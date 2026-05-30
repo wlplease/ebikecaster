@@ -1048,19 +1048,24 @@ function Leaderboard({
 function UpgradePanel({
   enabled,
   isPro,
+  annualActive,
   onConnect,
   onEthSupport,
+  onAnnualPass,
 }: {
   enabled: boolean;
   isPro: boolean;
+  annualActive: boolean;
   onConnect: () => void;
   onEthSupport: () => void;
+  onAnnualPass: () => void;
 }) {
   const { address } = useAccount();
-  const [plan, setPlan] = useState<"daily" | "weekly">("weekly");
+  const [plan, setPlan] = useState<"weekly" | "yearly">("weekly");
+  const [pendingPlan, setPendingPlan] = useState<"weekly" | "yearly" | null>(null);
   const [step, setStep] = useState<"idle" | "approving" | "buying">("idle");
-  const price = BigInt(plan === "weekly" ? WEEKLY_PRICE : DAILY_PRICE);
-  const priceLabel = plan === "weekly" ? "$2 weekly" : "$0.50 daily";
+  const price = BigInt(plan === "weekly" ? WEEKLY_PRICE : YEARLY_PRICE);
+  const priceLabel = plan === "weekly" ? "$1 weekly" : "$7 yearly";
 
   const { data: balance } = useReadContract({
     address: USDC_CONTRACT,
@@ -1085,7 +1090,7 @@ function UpgradePanel({
   const { isLoading: confirmingEth, isSuccess: ethConfirmed } = useWaitForTransactionReceipt({ hash: ethHash });
 
   const hasEnough = typeof balance === "bigint" && balance >= price;
-  const needsApproval = typeof allowance !== "bigint" || allowance < price;
+  const needsApproval = plan === "weekly" && (typeof allowance !== "bigint" || allowance < price);
   const busy = approving || buying || sendingEth || confirmingEth || step !== "idle";
   const treasuryReady = !!TREASURY_ADDRESS && ETH_ADDRESS_REGEX_CLIENT.test(TREASURY_ADDRESS);
 
@@ -1093,18 +1098,23 @@ function UpgradePanel({
     if (approved && step === "approving") {
       refetchAllowance();
       setStep("buying");
+      setPendingPlan("weekly");
       resetBuy();
       buy({
         address: PRO_PASS_CONTRACT,
         abi: PRO_PASS_ABI,
-        functionName: plan === "weekly" ? "buyWeekly" : "buyDaily",
+        functionName: "buyWeekly",
       });
     }
-  }, [approved, buy, plan, refetchAllowance, resetBuy, step]);
+  }, [approved, buy, refetchAllowance, resetBuy, step]);
 
   useEffect(() => {
-    if (bought && step === "buying") setStep("idle");
-  }, [bought, step]);
+    if (bought && step === "buying") {
+      if (pendingPlan === "yearly") onAnnualPass();
+      setPendingPlan(null);
+      setStep("idle");
+    }
+  }, [bought, onAnnualPass, pendingPlan, step]);
 
   useEffect(() => {
     if (ethConfirmed) onEthSupport();
@@ -1115,22 +1125,37 @@ function UpgradePanel({
       onConnect();
       return;
     }
+    if (plan === "yearly") {
+      if (!treasuryReady) return;
+      setStep("buying");
+      setPendingPlan("yearly");
+      resetBuy();
+      buy({
+        address: USDC_CONTRACT,
+        abi: USDC_ABI,
+        functionName: "transfer",
+        args: [TREASURY_ADDRESS, BigInt(YEARLY_PRICE)],
+      });
+      return;
+    }
     if (needsApproval) {
       setStep("approving");
+      setPendingPlan("weekly");
       resetApprove();
       approve({
         address: USDC_CONTRACT,
         abi: USDC_ABI,
         functionName: "approve",
-        args: [PRO_PASS_CONTRACT, price * 12n],
+        args: [PRO_PASS_CONTRACT, BigInt(WEEKLY_PRICE) * 12n],
       });
     } else {
       setStep("buying");
+      setPendingPlan("weekly");
       resetBuy();
       buy({
         address: PRO_PASS_CONTRACT,
         abi: PRO_PASS_ABI,
-        functionName: plan === "weekly" ? "buyWeekly" : "buyDaily",
+        functionName: "buyWeekly",
       });
     }
   };
@@ -1156,7 +1181,7 @@ function UpgradePanel({
             Cycle Pass
           </div>
           <div className="mt-1 text-xs font-semibold text-white/64">
-            Unlock Carbon Pro skin, premium score flair, and future pro routes. Digital access only.
+            Unlock Carbon Pro, premium score flair, and future pro routes. Weekly is contract-backed; yearly is paid in Base USDC.
           </div>
         </div>
         {isPro && <div className="rounded bg-[#a2ff9a] px-2 py-1 text-[10px] font-black text-[#111923]">ACTIVE</div>}
@@ -1167,23 +1192,33 @@ function UpgradePanel({
           style={{ borderColor: plan === "weekly" ? "#fbe764" : "rgba(255,255,255,0.14)" }}
           onClick={() => setPlan("weekly")}
         >
-          Weekly $2
+          Weekly $1
         </button>
         <button
           className="rounded-md border px-2 py-2 text-xs font-black text-white"
-          style={{ borderColor: plan === "daily" ? "#fbe764" : "rgba(255,255,255,0.14)" }}
-          onClick={() => setPlan("daily")}
+          style={{ borderColor: plan === "yearly" ? "#fbe764" : "rgba(255,255,255,0.14)" }}
+          onClick={() => setPlan("yearly")}
         >
-          Daily $0.50
+          Year $7
         </button>
       </div>
       <button
         className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[#fbe764] px-3 text-xs font-black text-[#111923] disabled:opacity-60"
-        disabled={enabled && (!hasEnough || busy)}
+        disabled={enabled && (!hasEnough || busy || (plan === "yearly" && !treasuryReady) || (plan === "yearly" && annualActive))}
         onClick={purchase}
       >
         <Wallet size={15} />
-        {!enabled ? "Connect for Base USDC" : busy ? "Confirming" : hasEnough ? `Buy ${priceLabel}` : "Need USDC on Base"}
+        {!enabled
+          ? "Connect for Base USDC"
+          : annualActive && plan === "yearly"
+            ? "Year Pass Active"
+            : plan === "yearly" && !treasuryReady
+              ? "Set treasury address"
+              : busy
+                ? "Confirming"
+                : hasEnough
+                  ? `Buy ${priceLabel}`
+                  : "Need USDC on Base"}
       </button>
       <button
         className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/15 px-3 text-xs font-black text-white disabled:opacity-60"
