@@ -3,7 +3,7 @@ import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
-const LINE_IDS = ["ready", "start", "boost", "mission", "finish", "claim"] as const;
+const LINE_IDS = ["ready", "start", "boost", "mission", "finish", "claim", "legal"] as const;
 type LineId = (typeof LINE_IDS)[number];
 
 const VOICE_BY_LINE: Record<LineId, string> = {
@@ -13,6 +13,7 @@ const VOICE_BY_LINE: Record<LineId, string> = {
   mission: process.env.ELEVENLABS_VOICE_PRIYA || "atf1ppeJGCYFBlCLZ26e",
   finish: process.env.ELEVENLABS_VOICE_VALE || "UgBBYS2sOqTuMpoF3BR0",
   claim: process.env.ELEVENLABS_VOICE_MARA || "iEbJsqzb6jw8MYxZ2xca",
+  legal: process.env.ELEVENLABS_VOICE_LEGAL || "CeNX9CMwmxDxUF5Q2Inm",
 };
 
 function json(data: unknown, status = 200) {
@@ -39,6 +40,7 @@ function voiceLine(line: LineId, request: NextRequest) {
   if (line === "boost") return "Boost chain. Keep it clean.";
   if (line === "mission") return `${mission} cleared. Nice ride.`;
   if (line === "finish") return "Ride complete. Share the score and make the feed chase you.";
+  if (line === "legal") return "Cycle Pass payments go directly to the treasury on Base. CYCLE credits are gameplay rewards, non-transferable, and have no cash value.";
   return "Credits ready. Claim your verified ride rewards on Base.";
 }
 

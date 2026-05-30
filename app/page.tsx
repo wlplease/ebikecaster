@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import Image from "next/image";
 import {
   BatteryCharging,
@@ -58,7 +58,7 @@ type EntityKind = "bolt" | "cone" | "pothole" | "barrier" | "ramp" | "gate";
 type LeaderboardScope = "global" | "friends";
 type MissionKind = "combo" | "clean" | "boosts" | "battery" | "bolts";
 type SfxId = "start" | "lane" | "bolt" | "boost" | "hit" | "clear" | "finish";
-type VoiceLineId = "ready" | "start" | "boost" | "mission" | "finish" | "claim";
+type VoiceLineId = "ready" | "start" | "boost" | "mission" | "finish" | "claim" | "legal";
 type HapticKind = "selection" | "light" | "medium" | "heavy" | "success" | "warning" | "error";
 
 type RouteTheme = {
@@ -133,7 +133,18 @@ type GameModel = {
 
 type Hud = Pick<
   GameModel,
-  "phase" | "distance" | "speed" | "battery" | "score" | "pickups" | "hits" | "boosts" | "nearMisses" | "combo" | "bestCombo"
+  | "phase"
+  | "distance"
+  | "speed"
+  | "battery"
+  | "score"
+  | "pickups"
+  | "hits"
+  | "boosts"
+  | "nearMisses"
+  | "combo"
+  | "bestCombo"
+  | "targetLane"
 >;
 
 type PersistedStats = {
@@ -346,6 +357,7 @@ function emptyHud(game: GameModel): Hud {
     nearMisses: game.nearMisses,
     combo: game.combo,
     bestCombo: game.bestCombo,
+    targetLane: game.targetLane,
   };
 }
 
@@ -449,6 +461,7 @@ export default function CasterCycleApp() {
   const rafRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number | null>(null);
   const lastHudRef = useRef(0);
+  const coursePointerRef = useRef<{ x: number; y: number } | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const voiceRef = useRef<HTMLAudioElement | null>(null);
   const [hud, setHud] = useState<Hud>(() => emptyHud(gameRef.current));
@@ -573,8 +586,8 @@ export default function CasterCycleApp() {
     });
   }, [audioEnabled, primeAudio]);
 
-  const playVoice = useCallback((line: VoiceLineId, params: Record<string, string | number> = {}) => {
-    if (!voiceEnabled) return;
+  const playVoice = useCallback((line: VoiceLineId, params: Record<string, string | number> = {}, force = false) => {
+    if (!voiceEnabled && !force) return;
     const url = new URL("/api/ride-voice", window.location.origin);
     url.searchParams.set("line", line);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
@@ -733,9 +746,10 @@ export default function CasterCycleApp() {
     }
     if (current.phase !== "riding") return;
     current.targetLane = clamp(current.targetLane + direction, -1, 1) as Lane;
+    syncHud();
     haptic("light");
     playSfx("lane");
-  }, [playSfx, startRide]);
+  }, [playSfx, startRide, syncHud]);
 
   const boostOrHop = useCallback(() => {
     const current = gameRef.current;
@@ -748,10 +762,33 @@ export default function CasterCycleApp() {
       current.airborne = 1;
       current.boost = Math.max(current.boost, 0.4);
       current.battery = clamp(current.battery - 2.2, 0, 100);
+      syncHud();
       haptic("medium");
       playSfx("boost");
     }
-  }, [playSfx, startRide]);
+  }, [playSfx, startRide, syncHud]);
+
+  const handleCoursePointerDown = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
+    coursePointerRef.current = { x: event.clientX, y: event.clientY };
+  }, []);
+
+  const handleCoursePointerUp = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
+    const start = coursePointerRef.current;
+    coursePointerRef.current = null;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const dx = start ? event.clientX - start.x : 0;
+    const dy = start ? event.clientY - start.y : 0;
+
+    if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy) * 1.15) {
+      changeLane(dx > 0 ? 1 : -1);
+      return;
+    }
+
+    if (x < rect.width * 0.34) changeLane(-1);
+    else if (x > rect.width * 0.66) changeLane(1);
+    else boostOrHop();
+  }, [boostOrHop, changeLane]);
 
   const shareCast = useCallback(async (text: string, embeds: [] | [string] | [string, string], copiedText = "Share copied") => {
     try {
@@ -1070,13 +1107,11 @@ export default function CasterCycleApp() {
         ref={canvasRef}
         aria-label="CasterCycle forward-scrolling e-bike game"
         className="absolute inset-0 h-full w-full touch-none"
-        onPointerDown={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect();
-          const x = event.clientX - rect.left;
-          if (x < rect.width * 0.34) changeLane(-1);
-          else if (x > rect.width * 0.66) changeLane(1);
-          else boostOrHop();
+        onPointerDown={handleCoursePointerDown}
+        onPointerCancel={() => {
+          coursePointerRef.current = null;
         }}
+        onPointerUp={handleCoursePointerUp}
       />
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(7,17,27,0.08),transparent_24%,transparent_70%,rgba(7,17,27,0.48))]" />
 
@@ -1125,12 +1160,15 @@ export default function CasterCycleApp() {
             <Metric icon={<Gauge size={14} />} label="mph" value={String(Math.round(hud.speed / 8))} />
             <Metric icon={<Zap size={14} />} label="bolts" value={String(hud.pickups)} />
             <Metric icon={<Flame size={14} />} label="combo" value={`${hud.combo}x`} />
-            <Metric icon={<Bike size={14} />} label="lane" value={game.targetLane === -1 ? "left" : game.targetLane === 1 ? "right" : "mid"} />
+            <Metric icon={<Bike size={14} />} label="lane" value={hud.targetLane === -1 ? "left" : hud.targetLane === 1 ? "right" : "mid"} />
           </div>
           <div className="pointer-events-auto mt-2 grid grid-cols-3 gap-2">
             <button
               aria-label="Move left"
-              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-md border border-white/18 bg-black/32 text-xs font-black uppercase tracking-[0.08em] text-white/80 backdrop-blur-md active:scale-[0.98]"
+              aria-pressed={hud.targetLane === -1}
+              className={`inline-flex min-h-11 select-none items-center justify-center gap-1 rounded-md border text-xs font-black uppercase tracking-[0.08em] backdrop-blur-md touch-manipulation active:scale-[0.98] ${
+                hud.targetLane === -1 ? "border-[#7cf2ff]/65 bg-[#7cf2ff]/18 text-[#7cf2ff]" : "border-white/18 bg-black/32 text-white/80"
+              }`}
               onClick={() => changeLane(-1)}
             >
               <ChevronLeft size={18} />
@@ -1138,7 +1176,7 @@ export default function CasterCycleApp() {
             </button>
             <button
               aria-label="Hop"
-              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-md border border-[#fbe764]/50 bg-[#fbe764]/18 text-xs font-black uppercase tracking-[0.08em] text-[#fbe764] backdrop-blur-md active:scale-[0.98]"
+              className="inline-flex min-h-11 select-none items-center justify-center gap-1 rounded-md border border-[#fbe764]/50 bg-[#fbe764]/18 text-xs font-black uppercase tracking-[0.08em] text-[#fbe764] backdrop-blur-md touch-manipulation active:scale-[0.98]"
               onClick={boostOrHop}
             >
               <Zap size={16} />
@@ -1146,7 +1184,10 @@ export default function CasterCycleApp() {
             </button>
             <button
               aria-label="Move right"
-              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-md border border-white/18 bg-black/32 text-xs font-black uppercase tracking-[0.08em] text-white/80 backdrop-blur-md active:scale-[0.98]"
+              aria-pressed={hud.targetLane === 1}
+              className={`inline-flex min-h-11 select-none items-center justify-center gap-1 rounded-md border text-xs font-black uppercase tracking-[0.08em] backdrop-blur-md touch-manipulation active:scale-[0.98] ${
+                hud.targetLane === 1 ? "border-[#7cf2ff]/65 bg-[#7cf2ff]/18 text-[#7cf2ff]" : "border-white/18 bg-black/32 text-white/80"
+              }`}
               onClick={() => changeLane(1)}
             >
               Right
@@ -1274,6 +1315,7 @@ export default function CasterCycleApp() {
               onConnect={connectWallet}
               onEthSupport={unlockEthSupporter}
               onPassPurchased={unlockPass}
+              onVoiceInfo={() => playVoice("legal", {}, true)}
             />
             <SkinPicker skins={SKINS} selected={selectedSkin} isUnlocked={skinUnlocked} onSelect={setSelectedSkin} />
             <Leaderboard
@@ -1847,6 +1889,7 @@ function UpgradePanel({
   onConnect,
   onEthSupport,
   onPassPurchased,
+  onVoiceInfo,
 }: {
   enabled: boolean;
   isPro: boolean;
@@ -1855,6 +1898,7 @@ function UpgradePanel({
   onConnect: () => void;
   onEthSupport: () => void;
   onPassPurchased: (plan: "weekly" | "yearly") => void;
+  onVoiceInfo: () => void;
 }) {
   const { address } = useAccount();
   const chainId = useChainId();
@@ -1946,7 +1990,16 @@ function UpgradePanel({
             Unlock Carbon Pro, premium score flair, and future pro routes. Payments go direct to treasury on Base.
           </div>
         </div>
-        {isPro && <div className="rounded bg-[#a2ff9a] px-2 py-1 text-[10px] font-black text-[#111923]">ACTIVE</div>}
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            aria-label="Play Cycle Pass payment note"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-white/15 bg-black/18 text-white/72 active:scale-[0.98]"
+            onClick={onVoiceInfo}
+          >
+            <Radio size={14} />
+          </button>
+          {isPro && <div className="rounded bg-[#a2ff9a] px-2 py-1 text-[10px] font-black text-[#111923]">ACTIVE</div>}
+        </div>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <button
