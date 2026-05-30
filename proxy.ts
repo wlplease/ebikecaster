@@ -36,9 +36,13 @@ export function proxy(request: NextRequest) {
   response.headers.set("X-XSS-Protection", "1; mode=block");
   response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  const scriptSrc = process.env.NODE_ENV === "development"
+    ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+    : "script-src 'self' 'unsafe-inline'";
+
   response.headers.set(
     "Content-Security-Policy",
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https://auth.farcaster.xyz https://*.neynar.com https://*.base.org https://*.alchemy.com; frame-src 'self' https://*.farcaster.xyz; frame-ancestors 'self' https://*.farcaster.xyz https://farcaster.xyz;",
+    `default-src 'self'; ${scriptSrc}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https://auth.farcaster.xyz https://*.neynar.com https://*.base.org https://*.alchemy.com; frame-src 'self' https://*.farcaster.xyz; frame-ancestors 'self' https://*.farcaster.xyz https://farcaster.xyz;`,
   );
 
   return response;

@@ -87,8 +87,15 @@ async function verifyQuickAuth(request: NextRequest) {
   const client = createClient();
   try {
     const payload = await client.verifyJwt({ token, domain });
+    const claims = payload as typeof payload & Record<string, unknown>;
     const sub = typeof payload.sub === "number" ? payload.sub : Number(payload.sub || 0);
-    const address = typeof payload.address === "string" ? payload.address.toLowerCase() : "";
+    const rawAddress =
+      typeof claims.address === "string"
+        ? claims.address
+        : typeof claims.walletAddress === "string"
+          ? claims.walletAddress
+          : "";
+    const address = ETH_ADDRESS_REGEX.test(rawAddress) ? rawAddress.toLowerCase() : "";
     return { fid: sub, address };
   } catch {
     return null;

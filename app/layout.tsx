@@ -4,15 +4,16 @@ import { FarcasterGate } from "@/components/farcaster-gate";
 import { Providers } from "@/components/providers";
 import { Analytics } from "@vercel/analytics/next";
 
-const appDomain = "https://castercycle.vercel.app";
+const appDomain = process.env.NEXT_PUBLIC_APP_URL || "https://castercycle.vercel.app";
 
 const accountAssociation = {
   header:
+    process.env.FARCASTER_ACCOUNT_ASSOCIATION_HEADER ||
     "eyJmaWQiOjEwNTkwNzUsInR5cGUiOiJhdXRoIiwia2V5IjoiMHg3NmJDNzVFZjJGMWYwRjI1ZTA3ODY0MTkxMEQ4RTIzQTQzMDIwNEY1In0",
   payload:
-    "eyJkb21haW4iOiJlYmlrZWNhc3Rlci52ZXJjZWwuYXBwIn0",
-  signature:
-    "z6Nv35E2261R/UQGA5R78OXF5Fa+txVlURQzbNebQEFiH9NJP07xJkvBTGyT2Rf/Pd1TxrY9Jl2SPlWlLYmE+Rs=",
+    process.env.FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD ||
+    "eyJkb21haW4iOiJjYXN0ZXJjeWNsZS52ZXJjZWwuYXBwIn0=",
+  signature: process.env.FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE || "",
 };
 
 const miniAppEmbed = {
@@ -30,8 +31,15 @@ const miniAppEmbed = {
   },
 };
 
+const miniAppMetadata = {
+  "fc:miniapp": JSON.stringify(miniAppEmbed),
+  ...(accountAssociation.signature
+    ? { "fc:miniapp:account_association": JSON.stringify(accountAssociation) }
+    : {}),
+};
+
 export const metadata: Metadata = {
-  title: "CasterCycle E-Bike Dash",
+  title: "CasterCycle",
   description:
     "Ride today's forward-scrolling e-bike route, post your score, and challenge Farcaster friends.",
   manifest: "/manifest.json",
@@ -41,16 +49,13 @@ export const metadata: Metadata = {
     apple: "/media/castercycle.png",
   },
   openGraph: {
-    title: "CasterCycle E-Bike Dash",
+    title: "CasterCycle",
     description:
       "One daily e-bike route. Grab charge, clear hazards, and share the score to beat.",
     url: appDomain,
     images: [{ url: `${appDomain}/media/castercycle-hero.png`, width: 1200, height: 630 }],
   },
-  other: {
-    "fc:miniapp": JSON.stringify(miniAppEmbed),
-    "fc:miniapp:account_association": JSON.stringify(accountAssociation),
-  },
+  other: miniAppMetadata,
 };
 
 export const viewport: Viewport = {

@@ -25,6 +25,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 voltlane-dev.*.log
+.next-*castercycle*.log
 
 # local env files
 .env*.local

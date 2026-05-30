@@ -48,7 +48,7 @@ const YEAR_SECONDS = 365 * 24 * 60 * 60;
 
 type RidePhase = "ready" | "riding" | "finished";
 type Lane = -1 | 0 | 1;
-type EntityKind = "bolt" | "cone" | "pothole" | "barrier" | "ramp";
+type EntityKind = "bolt" | "cone" | "pothole" | "barrier" | "ramp" | "gate";
 type LeaderboardScope = "global" | "friends";
 
 type RouteTheme = {
@@ -103,6 +103,10 @@ type GameModel = {
   nearMisses: number;
   combo: number;
   bestCombo: number;
+  feedback: string;
+  feedbackT: number;
+  feedbackColor: string;
+  shake: number;
   entities: Entity[];
   submitted: boolean;
 };
@@ -244,17 +248,19 @@ function buildEntities(seed: number) {
     const lane = ([-1, 0, 1] as Lane[])[Math.floor(random() * 3)];
     const roll = random();
 
-    if (roll < 0.34) {
+    if (roll < 0.3) {
       entities.push({ id: id++, kind: "bolt", lane, at });
       if (random() > 0.62) entities.push({ id: id++, kind: "bolt", lane, at: at + 72 });
-    } else if (roll < 0.52) {
+    } else if (roll < 0.47) {
       entities.push({ id: id++, kind: "cone", lane, at });
-    } else if (roll < 0.68) {
+    } else if (roll < 0.62) {
       entities.push({ id: id++, kind: "pothole", lane, at });
-    } else if (roll < 0.84) {
+    } else if (roll < 0.78) {
       entities.push({ id: id++, kind: "barrier", lane, at });
-    } else {
+    } else if (roll < 0.91) {
       entities.push({ id: id++, kind: "ramp", lane, at });
+    } else {
+      entities.push({ id: id++, kind: "gate", lane, at });
     }
   }
 
@@ -284,6 +290,10 @@ function makeGame() {
     nearMisses: 0,
     combo: 0,
     bestCombo: 0,
+    feedback: "",
+    feedbackT: 0,
+    feedbackColor: "#fbe764",
+    shake: 0,
     entities: buildEntities(seed),
     submitted: false,
   };
@@ -316,6 +326,13 @@ function finalScore(game: GameModel) {
       game.battery * 18 +
       cleanBonus,
   );
+}
+
+function rideSignal(game: GameModel, feedback: string, color: string, shake = 0) {
+  game.feedback = feedback;
+  game.feedbackColor = color;
+  game.feedbackT = 0.82;
+  game.shake = Math.max(game.shake, shake);
 }
 
 function skinShortName(name: string) {
@@ -653,6 +670,8 @@ export default function CasterCycleApp() {
       const dt = Math.min(0.034, (now - last) / 1000);
       lastFrameRef.current = now;
       const current = gameRef.current;
+      if (current.feedbackT > 0) current.feedbackT = Math.max(0, current.feedbackT - dt);
+      if (current.shake > 0) current.shake = Math.max(0, current.shake - dt * 3.4);
 
       if (current.phase === "riding") {
         const targetOffset = current.targetLane;
@@ -680,7 +699,14 @@ export default function CasterCycleApp() {
             current.combo += 1;
             current.bestCombo = Math.max(current.bestCombo, current.combo);
             current.battery = clamp(current.battery + 7.5, 0, 100);
-            current.score += 190 + current.combo * 18;
+            current.score += 190 + current.combo * 20;
+            if (current.combo % 5 === 0) {
+              current.boost = Math.max(current.boost, 0.55);
+              current.score += 160;
+              rideSignal(current, `${current.combo}X FLOW`, current.route.roadEdge, 0.08);
+            } else {
+              rideSignal(current, "+CHARGE", current.route.bolt);
+            }
             haptic("light");
           } else if (entity.kind === "ramp" && !entity.hit && laneMatch && rel < 36) {
             entity.hit = true;
@@ -689,19 +715,41 @@ export default function CasterCycleApp() {
             current.bestCombo = Math.max(current.bestCombo, current.combo);
             current.airborne = 1;
             current.boost = 1;
-            current.score += 340;
+            current.score += 360 + current.combo * 18;
+            rideSignal(current, "BOOST RAMP", "#a2ff9a", 0.12);
             haptic("medium");
-          } else if (entity.kind !== "bolt" && entity.kind !== "ramp" && !entity.hit && rel < 22) {
+          } else if (entity.kind === "gate" && !entity.hit && laneMatch && rel < 38) {
+            entity.hit = true;
+            current.boosts += 1;
+            current.combo += 2;
+            current.bestCombo = Math.max(current.bestCombo, current.combo);
+            current.boost = Math.max(current.boost, 0.88);
+            current.battery = clamp(current.battery + 3.5, 0, 100);
+            current.score += 450 + current.combo * 28;
+            rideSignal(current, "SIGNAL GATE", current.route.roadEdge, 0.1);
+            haptic("medium");
+          } else if (entity.kind !== "bolt" && entity.kind !== "ramp" && entity.kind !== "gate" && !entity.hit && rel < 22) {
             entity.hit = true;
             if (laneMatch && current.airborne <= 0.35) {
               current.hits += 1;
               current.combo = 0;
               current.battery = clamp(current.battery - (entity.kind === "pothole" ? 13 : 11), 0, 100);
               current.boost = 0;
+              rideSignal(current, "BATTERY HIT", current.route.hazard, 0.9);
               haptic("error");
+            } else if (laneMatch && current.airborne > 0.35) {
+              current.nearMisses += 1;
+              current.combo += 1;
+              current.bestCombo = Math.max(current.bestCombo, current.combo);
+              current.score += 170 + current.combo * 14;
+              rideSignal(current, "AIR CLEAR", current.route.roadEdge, 0.08);
+              haptic("light");
             } else if (!laneMatch && Math.abs(entity.lane - current.laneOffset) < 1.18) {
               current.nearMisses += 1;
+              current.combo += 1;
+              current.bestCombo = Math.max(current.bestCombo, current.combo);
               current.score += 120;
+              rideSignal(current, "CLOSE CALL", "#ffffff", 0.05);
               haptic("light");
             }
           }
@@ -786,9 +834,9 @@ export default function CasterCycleApp() {
       {hud.phase === "riding" && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 px-3">
           <div className="grid grid-cols-4 gap-2">
-            <Metric icon={<Gauge size={14} />} label="speed" value={`${Math.round(hud.speed / 8)} mph`} />
+            <Metric icon={<Gauge size={14} />} label="mph" value={String(Math.round(hud.speed / 8))} />
             <Metric icon={<Zap size={14} />} label="bolts" value={String(hud.pickups)} />
-            <Metric icon={<Sparkles size={14} />} label="misses" value={String(hud.nearMisses)} />
+            <Metric icon={<Flame size={14} />} label="combo" value={`${hud.combo}x`} />
             <Metric icon={<Bike size={14} />} label="lane" value={game.targetLane === -1 ? "left" : game.targetLane === 1 ? "right" : "mid"} />
           </div>
           <div className="mt-2 rounded-full border border-white/20 bg-black/30 px-4 py-2 text-center text-[11px] font-bold uppercase tracking-[0.14em] text-white/78 backdrop-blur-md">
@@ -915,10 +963,10 @@ export default function CasterCycleApp() {
 
 function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-md border border-white/14 bg-black/28 px-2 py-2 text-white shadow-lg backdrop-blur-md">
+    <div className="min-w-0 rounded-md border border-white/14 bg-black/28 px-1.5 py-2 text-white shadow-lg backdrop-blur-md">
       <div className="flex items-center justify-between text-[#fbe764]">{icon}</div>
-      <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white/50">{label}</div>
-      <div className="truncate text-sm font-black leading-tight">{value}</div>
+      <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.08em] text-white/50">{label}</div>
+      <div className="whitespace-nowrap text-[12px] font-black leading-tight">{value}</div>
     </div>
   );
 }
@@ -1126,7 +1174,8 @@ function UpgradePanel({
       return;
     }
     if (plan === "yearly") {
-      if (!treasuryReady) return;
+      const treasury = TREASURY_ADDRESS;
+      if (!treasuryReady || !treasury) return;
       setStep("buying");
       setPendingPlan("yearly");
       resetBuy();
@@ -1134,7 +1183,7 @@ function UpgradePanel({
         address: USDC_CONTRACT,
         abi: USDC_ABI,
         functionName: "transfer",
-        args: [TREASURY_ADDRESS, BigInt(YEARLY_PRICE)],
+        args: [treasury, BigInt(YEARLY_PRICE)],
       });
       return;
     }
@@ -1241,6 +1290,12 @@ function lanePoint(width: number, height: number, lane: number, progress: number
 }
 
 function drawScene(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel, skin: Skin, now: number) {
+  ctx.save();
+  if (game.shake > 0) {
+    const pulse = Math.sin(now * 0.08) * game.shake * 7;
+    ctx.translate(pulse, Math.cos(now * 0.07) * game.shake * 4);
+  }
+
   const sky = ctx.createLinearGradient(0, 0, 0, height);
   sky.addColorStop(0, game.route.skyTop);
   sky.addColorStop(0.54, game.route.skyBottom);
@@ -1249,6 +1304,7 @@ function drawScene(ctx: CanvasRenderingContext2D, width: number, height: number,
   ctx.fillRect(0, 0, width, height);
 
   drawWorld(ctx, width, height, game, now);
+  if (game.phase === "riding") drawSpeedLines(ctx, width, height, game, now);
   drawRoad(ctx, width, height, game);
 
   const visible = game.entities
@@ -1262,9 +1318,11 @@ function drawScene(ctx: CanvasRenderingContext2D, width: number, height: number,
   }
 
   drawPlayer(ctx, width, height, game, skin, now);
+  drawFeedback(ctx, width, height, game);
 
   if (game.phase === "ready") drawStartText(ctx, width, height, game);
   if (game.phase === "finished") drawFinishGate(ctx, width, height, game);
+  ctx.restore();
 }
 
 function drawWorld(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel, now: number) {
@@ -1331,6 +1389,27 @@ function drawWorld(ctx: CanvasRenderingContext2D, width: number, height: number,
   }
 }
 
+function drawSpeedLines(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel, now: number) {
+  const intensity = 0.18 + game.boost * 0.42;
+  ctx.save();
+  ctx.globalAlpha = intensity;
+  ctx.lineCap = "round";
+  for (let i = 0; i < 18; i += 1) {
+    const side = i % 2 === 0 ? -1 : 1;
+    const drift = ((i * 97 + now * (0.045 + game.boost * 0.04)) % 420) / 420;
+    const y = height * 0.2 + drift * height * 0.76;
+    const length = 24 + drift * 90 + game.boost * 40;
+    const x = width / 2 + side * (width * (0.18 + drift * 0.42));
+    ctx.strokeStyle = i % 3 === 0 ? game.route.roadEdge : game.route.bolt;
+    ctx.lineWidth = 1.2 + drift * 2.2;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + side * length, y + length * 0.48);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawRoad(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel) {
   const horizon = height * 0.25;
   const bottom = height - 76;
@@ -1372,6 +1451,21 @@ function drawRoad(ctx: CanvasRenderingContext2D, width: number, height: number, 
   ctx.stroke();
   ctx.shadowBlur = 0;
 
+  ctx.save();
+  ctx.globalAlpha = 0.58 + game.boost * 0.24;
+  for (const lane of [-1, 0, 1] as Lane[]) {
+    const points = [0.12, 0.34, 0.56, 0.78].map((p) => lanePoint(width, height, lane, p));
+    ctx.strokeStyle = lane === 0 ? "rgba(251,231,100,0.28)" : "rgba(124,242,255,0.22)";
+    ctx.lineWidth = lane === 0 ? 8 : 5;
+    ctx.shadowColor = lane === 0 ? game.route.bolt : game.route.roadEdge;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (const point of points.slice(1)) ctx.lineTo(point.x, point.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+
   ctx.strokeStyle = "rgba(255,255,255,0.36)";
   ctx.lineWidth = 2;
   for (const lane of [-0.5, 0.5]) {
@@ -1386,6 +1480,25 @@ function drawRoad(ctx: CanvasRenderingContext2D, width: number, height: number, 
       ctx.lineTo(b.x, b.y);
     }
     ctx.stroke();
+  }
+
+  for (let i = 0; i < 8; i += 1) {
+    const loop = (i * 135 - (game.distance * 1.04) % 135 + 135) % 135;
+    const p = loop / 135;
+    const point = lanePoint(width, height, 0, p);
+    ctx.save();
+    ctx.translate(point.x, point.y);
+    ctx.scale(point.scale, point.scale);
+    ctx.globalAlpha = 0.36 + game.boost * 0.25;
+    ctx.strokeStyle = game.route.bolt;
+    ctx.lineWidth = 4;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(-18, 8);
+    ctx.lineTo(0, -8);
+    ctx.lineTo(18, 8);
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
@@ -1427,6 +1540,27 @@ function drawEntity(ctx: CanvasRenderingContext2D, width: number, height: number
     ctx.strokeStyle = "rgba(255,255,255,0.8)";
     ctx.lineWidth = 4;
     ctx.stroke();
+  } else if (entity.kind === "gate") {
+    ctx.strokeStyle = route.roadEdge;
+    ctx.shadowColor = route.roadEdge;
+    ctx.shadowBlur = 18;
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.arc(0, -2, 33, -Math.PI * 0.12, Math.PI * 1.12);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(17,25,35,0.82)";
+    roundRect(ctx, -24, -10, 48, 20, 6);
+    ctx.fill();
+    ctx.fillStyle = route.bolt;
+    ctx.beginPath();
+    ctx.moveTo(-3, -18);
+    ctx.lineTo(12, -1);
+    ctx.lineTo(2, 0);
+    ctx.lineTo(7, 18);
+    ctx.lineTo(-13, 1);
+    ctx.lineTo(-3, -1);
+    ctx.closePath();
+    ctx.fill();
   } else if (entity.kind === "pothole") {
     ctx.fillStyle = "#090f17";
     ctx.beginPath();
@@ -1534,6 +1668,31 @@ function drawPlayer(ctx: CanvasRenderingContext2D, width: number, height: number
   ctx.beginPath();
   ctx.ellipse(-6, -70, 16, 7, -0.08, 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
+}
+
+function drawFeedback(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel) {
+  if (game.feedbackT <= 0 || !game.feedback) return;
+  const alpha = clamp(game.feedbackT / 0.82, 0, 1);
+  const y = height * 0.38 - (1 - alpha) * 18;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "900 18px system-ui, sans-serif";
+  const textWidth = Math.min(width - 64, ctx.measureText(game.feedback).width + 42);
+  ctx.fillStyle = "rgba(10,16,24,0.72)";
+  ctx.strokeStyle = game.feedbackColor;
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = game.feedbackColor;
+  ctx.shadowBlur = 16;
+  roundRect(ctx, width / 2 - textWidth / 2, y - 20, textWidth, 40, 7);
+  ctx.fill();
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = game.feedbackColor;
+  ctx.fillText(game.feedback, width / 2, y);
   ctx.restore();
 }
 
