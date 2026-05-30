@@ -5,6 +5,7 @@ import Image from "next/image";
 import {
   BatteryCharging,
   Bike,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Crown,
@@ -18,6 +19,7 @@ import {
   Share2,
   ShieldCheck,
   Sparkles,
+  Target,
   Trophy,
   Users,
   Wallet,
@@ -27,6 +29,7 @@ import { sdk } from "@farcaster/miniapp-sdk";
 import { parseEther } from "viem";
 import { useAccount, useConnect, useReadContract, useSendTransaction, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { useFarcasterUser } from "@/components/farcaster-gate";
+import { CASTER_CREDITS_ABI, CASTER_CREDITS_CONTRACT, type RewardClaimPayload } from "@/lib/reward-credits";
 import {
   PRO_PASS_ABI,
   PRO_PASS_CONTRACT,
@@ -50,6 +53,7 @@ type RidePhase = "ready" | "riding" | "finished";
 type Lane = -1 | 0 | 1;
 type EntityKind = "bolt" | "cone" | "pothole" | "barrier" | "ramp" | "gate";
 type LeaderboardScope = "global" | "friends";
+type MissionKind = "combo" | "clean" | "boosts" | "battery" | "bolts";
 
 type RouteTheme = {
   name: string;
@@ -74,6 +78,14 @@ type Skin = {
   label: string;
 };
 
+type DailyMission = {
+  kind: MissionKind;
+  title: string;
+  goal: string;
+  target: number;
+  reward: number;
+};
+
 type Entity = {
   id: number;
   kind: EntityKind;
@@ -87,6 +99,7 @@ type GameModel = {
   phase: RidePhase;
   dateKey: string;
   route: RouteTheme;
+  mission: DailyMission;
   seed: number;
   distance: number;
   speed: number;
@@ -107,6 +120,7 @@ type GameModel = {
   feedbackT: number;
   feedbackColor: string;
   shake: number;
+  missionNotified: boolean;
   entities: Entity[];
   submitted: boolean;
 };
@@ -204,6 +218,14 @@ const SKINS: Skin[] = [
   { id: "carbon", name: "Carbon Pro", frame: "#f7fbff", battery: "#c4b5fd", trail: "#c4b5fd", unlock: "pro", label: "Cycle Pass" },
 ];
 
+const DAILY_MISSIONS: DailyMission[] = [
+  { kind: "combo", title: "Flow Thread", goal: "Reach an 8x combo", target: 8, reward: 700 },
+  { kind: "clean", title: "Clean Line", goal: "Finish with 1 hit or less", target: 1, reward: 750 },
+  { kind: "boosts", title: "Ramp Chain", goal: "Hit 4 boost gates", target: 4, reward: 650 },
+  { kind: "battery", title: "Range Saver", goal: "Finish above 62% battery", target: 62, reward: 725 },
+  { kind: "bolts", title: "Charge Hunt", goal: "Collect 10 bolts", target: 10, reward: 625 },
+];
+
 function localDateKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
@@ -267,6 +289,10 @@ function buildEntities(seed: number) {
   return entities;
 }
 
+function dailyMission(seed: number) {
+  return DAILY_MISSIONS[Math.floor((seed / ROUTES.length) % DAILY_MISSIONS.length)];
+}
+
 function makeGame() {
   const dateKey = localDateKey();
   const seed = dateSeed(dateKey);
@@ -274,6 +300,7 @@ function makeGame() {
     phase: "ready" as RidePhase,
     dateKey,
     route: ROUTES[seed % ROUTES.length],
+    mission: dailyMission(seed),
     seed,
     distance: 0,
     speed: 310,
@@ -294,6 +321,7 @@ function makeGame() {
     feedbackT: 0,
     feedbackColor: "#fbe764",
     shake: 0,
+    missionNotified: false,
     entities: buildEntities(seed),
     submitted: false,
   };
@@ -317,6 +345,7 @@ function emptyHud(game: GameModel): Hud {
 
 function finalScore(game: GameModel) {
   const cleanBonus = game.hits === 0 ? 1250 : Math.max(0, 520 - game.hits * 95);
+  const missionBonus = missionStatus(game).done ? game.mission.reward : 0;
   return Math.round(
     game.distance * 0.88 +
       game.pickups * 230 +
@@ -324,7 +353,8 @@ function finalScore(game: GameModel) {
       game.nearMisses * 140 +
       game.bestCombo * 95 +
       game.battery * 18 +
-      cleanBonus,
+      cleanBonus +
+      missionBonus,
   );
 }
 
@@ -333,6 +363,53 @@ function rideSignal(game: GameModel, feedback: string, color: string, shake = 0)
   game.feedbackColor = color;
   game.feedbackT = 0.82;
   game.shake = Math.max(game.shake, shake);
+}
+
+function missionStatus(game: GameModel) {
+  const { mission } = game;
+
+  if (mission.kind === "combo") {
+    const current = Math.min(game.bestCombo, mission.target);
+    return {
+      done: game.bestCombo >= mission.target,
+      progress: clamp(current / mission.target, 0, 1),
+      label: `${current}/${mission.target} combo`,
+    };
+  }
+
+  if (mission.kind === "clean") {
+    const done = game.phase === "finished" && game.hits <= mission.target;
+    return {
+      done,
+      progress: game.hits <= mission.target ? 0.72 : 0.22,
+      label: `${game.hits}/${mission.target} hits`,
+    };
+  }
+
+  if (mission.kind === "boosts") {
+    const current = Math.min(game.boosts, mission.target);
+    return {
+      done: game.boosts >= mission.target,
+      progress: clamp(current / mission.target, 0, 1),
+      label: `${current}/${mission.target} boosts`,
+    };
+  }
+
+  if (mission.kind === "battery") {
+    const battery = Math.round(game.battery);
+    return {
+      done: game.phase === "finished" && battery >= mission.target,
+      progress: clamp(battery / mission.target, 0, 1),
+      label: `${battery}%/${mission.target}%`,
+    };
+  }
+
+  const current = Math.min(game.pickups, mission.target);
+  return {
+    done: game.pickups >= mission.target,
+    progress: clamp(current / mission.target, 0, 1),
+    label: `${current}/${mission.target} bolts`,
+  };
 }
 
 function skinShortName(name: string) {
@@ -376,6 +453,7 @@ export default function CasterCycleApp() {
   const skin = SKINS.find((item) => item.id === selectedSkin) ?? SKINS[0];
   const displayName = user?.username ? `@${user.username}` : isStandalone ? "browser rider" : "farcaster rider";
   const progress = clamp(hud.distance / COURSE_LENGTH, 0, 1);
+  const mission = missionStatus(game);
   const annualActive = annualUntil > Math.floor(Date.now() / 1000);
   const effectivePro = isPro || annualActive;
 
@@ -543,8 +621,10 @@ export default function CasterCycleApp() {
 
   const shareRide = useCallback(async () => {
     const current = gameRef.current;
-    const shareUrl = `${APP_URL}/api/share-image?score=${current.score}&route=${encodeURIComponent(current.route.name)}&user=${encodeURIComponent(displayName)}&skin=${encodeURIComponent(skin.name)}&date=${current.dateKey}`;
-    const castText = `I scored ${current.score.toLocaleString()} on today's ${current.route.name} in CasterCycle.\n\n${current.pickups} charge bolts, ${current.boosts} boosts, ${Math.round(current.battery)}% battery left. Beat my ride:\n${APP_URL}`;
+    const mission = missionStatus(current);
+    const missionText = mission.done ? `\nDaily mission cleared: ${current.mission.title}.` : "";
+    const shareUrl = `${APP_URL}/api/share-image?score=${current.score}&route=${encodeURIComponent(current.route.name)}&user=${encodeURIComponent(displayName)}&skin=${encodeURIComponent(skin.name)}&date=${current.dateKey}&mission=${encodeURIComponent(mission.done ? `${current.mission.title} cleared` : current.mission.goal)}`;
+    const castText = `I scored ${current.score.toLocaleString()} on today's ${current.route.name} in CasterCycle.${missionText}\n\n${current.pickups} charge bolts, ${current.boosts} boosts, ${Math.round(current.battery)}% battery left. Beat my ride:\n${APP_URL}`;
     setSharing(true);
     try {
       await sdk.actions.composeCast({ text: castText, embeds: [shareUrl] });
@@ -755,6 +835,13 @@ export default function CasterCycleApp() {
           }
         }
 
+        const status = missionStatus(current);
+        if (!current.missionNotified && status.done) {
+          current.missionNotified = true;
+          rideSignal(current, "MISSION CLEAR", current.route.bolt, 0.18);
+          haptic("success");
+        }
+
         current.score = Math.max(
           current.score,
           Math.round(current.distance * 0.8 + current.pickups * 190 + current.boosts * 250 + current.nearMisses * 110 - current.hits * 85),
@@ -780,11 +867,12 @@ export default function CasterCycleApp() {
 
   const resultLabel = useMemo(() => {
     if (hud.phase !== "finished") return "daily ride";
+    if (mission.done) return "mission cleared";
     if (hud.hits === 0) return "clean commute";
     if (hud.nearMisses >= 4) return "threaded traffic";
     if (hud.boosts >= 3) return "boost specialist";
     return hud.battery <= 0 ? "battery tapped" : "ride complete";
-  }, [hud.battery, hud.boosts, hud.hits, hud.nearMisses, hud.phase]);
+  }, [hud.battery, hud.boosts, hud.hits, hud.nearMisses, hud.phase, mission.done]);
 
   return (
     <main
@@ -891,6 +979,16 @@ export default function CasterCycleApp() {
               <FeatureChip icon={<Wallet size={13} />} label="base" />
             </div>
 
+            <MissionPanel mission={game.mission} status={mission} />
+            <CreditsPanel
+              enabled={isConnected}
+              address={address}
+              userFid={user?.fid ?? 0}
+              dateKey={game.dateKey}
+              finished={hud.phase === "finished"}
+              onConnect={connectWallet}
+            />
+
             <div className="mt-4 grid grid-cols-2 gap-2">
               <button
                 className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#fbe764] px-4 text-sm font-black text-[#111923] transition active:scale-[0.98]"
@@ -985,6 +1083,175 @@ function FeatureChip({ icon, label }: { icon: React.ReactNode; label: string }) 
     <div className="flex min-h-9 items-center justify-center gap-1.5 rounded-md border border-white/10 bg-black/18 px-2 text-[10px] font-black uppercase tracking-[0.08em] text-white/72">
       <span className="text-[#fbe764]">{icon}</span>
       {label}
+    </div>
+  );
+}
+
+function MissionPanel({
+  mission,
+  status,
+}: {
+  mission: DailyMission;
+  status: ReturnType<typeof missionStatus>;
+}) {
+  return (
+    <div className="mt-3 rounded-md border border-[#7cf2ff]/25 bg-[#7cf2ff]/10 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#7cf2ff]">
+            <Target size={13} />
+            Daily Mission
+          </div>
+          <div className="mt-1 truncate text-sm font-black text-white">{mission.title}</div>
+          <div className="mt-0.5 text-xs font-semibold text-white/62">{mission.goal}</div>
+        </div>
+        <div className={`flex shrink-0 items-center gap-1 rounded px-2 py-1 text-[10px] font-black ${status.done ? "bg-[#a2ff9a] text-[#111923]" : "bg-white/10 text-white"}`}>
+          {status.done ? <CheckCircle2 size={13} /> : <Sparkles size={13} />}
+          {status.done ? "CLEAR" : `+${mission.reward}`}
+        </div>
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-black/30">
+          <div className="h-full rounded-full bg-[#7cf2ff]" style={{ width: `${Math.round(status.progress * 100)}%` }} />
+        </div>
+        <div className="w-20 text-right text-[10px] font-black uppercase tracking-[0.08em] text-white/70">{status.label}</div>
+      </div>
+    </div>
+  );
+}
+
+function CreditsPanel({
+  enabled,
+  address,
+  userFid,
+  dateKey,
+  finished,
+  onConnect,
+}: {
+  enabled: boolean;
+  address?: `0x${string}`;
+  userFid: number;
+  dateKey: string;
+  finished: boolean;
+  onConnect: () => void;
+}) {
+  const [status, setStatus] = useState("");
+  const [requesting, setRequesting] = useState<"ride" | "share" | null>(null);
+  const contractReady = !!CASTER_CREDITS_CONTRACT && ETH_ADDRESS_REGEX_CLIENT.test(CASTER_CREDITS_CONTRACT);
+
+  const { data: balance, refetch } = useReadContract({
+    address: CASTER_CREDITS_CONTRACT,
+    abi: CASTER_CREDITS_ABI,
+    functionName: "balanceOf",
+    args: address ? [address] : undefined,
+    query: { enabled: contractReady && !!address },
+  });
+
+  const { writeContract, data: claimHash, isPending: walletOpen } = useWriteContract();
+  const { isLoading: confirming, isSuccess: claimed } = useWaitForTransactionReceipt({ hash: claimHash });
+  const busy = !!requesting || walletOpen || confirming;
+
+  useEffect(() => {
+    if (!claimed) return;
+    setStatus("Credits claimed");
+    refetch();
+  }, [claimed, refetch]);
+
+  const requestClaim = async (kind: "ride" | "share") => {
+    if (!enabled) {
+      onConnect();
+      return;
+    }
+    if (!contractReady || !CASTER_CREDITS_CONTRACT) {
+      setStatus("Credits contract not deployed yet");
+      return;
+    }
+    if (!finished) {
+      setStatus("Finish a ride first");
+      return;
+    }
+    if (!userFid) {
+      setStatus("Open in Farcaster to claim");
+      return;
+    }
+    if (!address) {
+      setStatus("Connect wallet to claim");
+      return;
+    }
+
+    setRequesting(kind);
+    setStatus(kind === "share" ? "Preparing share bonus" : "Preparing ride credits");
+    try {
+      const res = await sdk.quickAuth.fetch("/api/reward-claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dateKey, kind, address }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.claim) {
+        setStatus(data.error || "Credits unavailable");
+        return;
+      }
+
+      const claim = data.claim as RewardClaimPayload;
+      writeContract({
+        address: CASTER_CREDITS_CONTRACT,
+        abi: CASTER_CREDITS_ABI,
+        functionName: "claim",
+        args: [
+          claim.to,
+          BigInt(claim.fid),
+          claim.dateKey,
+          BigInt(claim.score),
+          BigInt(claim.amount),
+          claim.claimId,
+          BigInt(claim.deadline),
+          claim.signature,
+        ],
+      });
+    } catch {
+      setStatus("Claim request failed");
+    } finally {
+      setRequesting(null);
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-md border border-[#0052ff]/35 bg-[#0052ff]/12 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#7cf2ff]">
+            <Zap size={13} />
+            Onchain Credits
+          </div>
+          <div className="mt-1 text-sm font-black text-white">{typeof balance === "bigint" ? `${balance.toLocaleString()} CYCLE` : "CYCLE rewards"}</div>
+          <div className="mt-0.5 text-xs font-semibold text-white/62">Non-transferable Base credits. No cash value.</div>
+        </div>
+        <div className={`rounded px-2 py-1 text-[10px] font-black ${contractReady ? "bg-[#a2ff9a] text-[#111923]" : "bg-white/10 text-white/62"}`}>
+          {contractReady ? "BASE" : "SETUP"}
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button
+          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[#fbe764] px-3 text-xs font-black text-[#111923] disabled:opacity-55"
+          disabled={busy || !finished || !contractReady}
+          onClick={() => requestClaim("ride")}
+        >
+          <Trophy size={14} />
+          {requesting === "ride" || confirming ? "Claiming" : "Ride Claim"}
+        </button>
+        <button
+          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/15 px-3 text-xs font-black text-white disabled:opacity-55"
+          disabled={busy || !finished || !contractReady}
+          onClick={() => requestClaim("share")}
+        >
+          <Share2 size={14} />
+          {requesting === "share" ? "Preparing" : "Share Bonus"}
+        </button>
+      </div>
+      <div className="mt-2 min-h-4 text-[10px] font-bold uppercase tracking-[0.08em] text-white/50">
+        {status || (contractReady ? "Claim after a verified score." : "Deploy credits contract to enable.")}
+      </div>
     </div>
   );
 }
@@ -1591,8 +1858,10 @@ function drawEntity(ctx: CanvasRenderingContext2D, width: number, height: number
 }
 
 function drawPlayer(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel, skin: Skin, now: number) {
-  const baseY = height - 110 - game.airborne * 42;
-  const x = lanePoint(width, height, game.laneOffset, 1).x;
+  const baseY = height - 172 - game.airborne * 42;
+  const horizon = height * 0.25;
+  const riderProgress = clamp((baseY - horizon) / (height - 108 - horizon), 0, 1);
+  const x = lanePoint(width, height, game.laneOffset, riderProgress).x;
   const lean = (game.targetLane - game.laneOffset) * 0.22;
   const bob = Math.sin(now / 90) * 2;
 

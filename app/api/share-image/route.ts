@@ -12,6 +12,7 @@ export async function GET(request: NextRequest) {
   const user = clean(request.nextUrl.searchParams.get("user"), "CasterCycle rider");
   const skin = clean(request.nextUrl.searchParams.get("skin"), "Signal Yellow");
   const date = clean(request.nextUrl.searchParams.get("date"), "");
+  const mission = clean(request.nextUrl.searchParams.get("mission"), "Daily mission live", 60);
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
@@ -47,7 +48,9 @@ export async function GET(request: NextRequest) {
   <text x="76" y="374" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="800" fill="#fbe764">DAILY RIDE SCORE</text>
   <text x="76" y="438" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="800" fill="white" opacity="0.86">${user}</text>
   <text x="76" y="486" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800" fill="white" opacity="0.64">Skin: ${skin}</text>
-  <text x="76" y="526" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800" fill="white" opacity="0.64">${date}</text>
+  <rect x="70" y="508" width="520" height="54" rx="14" fill="#101923" opacity="0.62"/>
+  <text x="96" y="542" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="900" fill="#7cf2ff">${mission}</text>
+  <text x="76" y="590" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800" fill="white" opacity="0.64">${date}</text>
 </svg>`;
 
   return new NextResponse(svg, {
