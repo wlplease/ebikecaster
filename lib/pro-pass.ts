@@ -1,10 +1,10 @@
-// CasterCycle - Daily and weekly access passes (USDC on Base)
+// CasterCycle - Weekly and yearly access passes (USDC on Base)
 
 import { useReadContract } from "wagmi";
 
 // ── Contract Addresses ──
 
-/** CasterCycle pass contract on Base (daily/weekly pass system) */
+/** CasterCycle pass contract on Base (weekly pass system) */
 export const PRO_PASS_CONTRACT = "0xa6c2e5ea11923f44839412d1f36026fb2f5af014" as `0x${string}`;
 
 /** Legacy ProPass contract — grandfathered monthly subscribers */
@@ -15,11 +15,11 @@ export const USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as `0x
 
 // ── Pricing (USDC 6 decimals) ──
 
-/** Daily pass price: $0.50 = 500,000 */
-export const DAILY_PRICE = 500_000;
+/** Weekly pass price: $1.00 = 1,000,000 */
+export const WEEKLY_PRICE = 1_000_000;
 
-/** Weekly pass price: $2.00 = 2,000,000 */
-export const WEEKLY_PRICE = 2_000_000;
+/** Yearly pass price: $7.00 = 7,000,000 */
+export const YEARLY_PRICE = 7_000_000;
 
 // CasterCycle pass ABI
 
@@ -297,6 +297,15 @@ export const LEGACY_PRO_PASS_ABI = [
 // ── USDC ABI (minimal) ──
 
 export const USDC_ABI = [
+  {
+    type: "function", name: "transfer",
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+    stateMutability: "nonpayable",
+  },
   {
     type: "function", name: "approve",
     inputs: [

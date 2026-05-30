@@ -4,17 +4,14 @@ import { FarcasterGate } from "@/components/farcaster-gate";
 import { Providers } from "@/components/providers";
 import { Analytics } from "@vercel/analytics/next";
 
-const appDomain = "https://ebikecaster.vercel.app";
+const appDomain = "https://castercycle.vercel.app";
 
 const accountAssociation = {
   header:
-    process.env.FARCASTER_ACCOUNT_ASSOCIATION_HEADER ||
     "eyJmaWQiOjEwNTkwNzUsInR5cGUiOiJhdXRoIiwia2V5IjoiMHg3NmJDNzVFZjJGMWYwRjI1ZTA3ODY0MTkxMEQ4RTIzQTQzMDIwNEY1In0",
   payload:
-    process.env.FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD ||
     "eyJkb21haW4iOiJlYmlrZWNhc3Rlci52ZXJjZWwuYXBwIn0",
   signature:
-    process.env.FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE ||
     "z6Nv35E2261R/UQGA5R78OXF5Fa+txVlURQzbNebQEFiH9NJP07xJkvBTGyT2Rf/Pd1TxrY9Jl2SPlWlLYmE+Rs=",
 };
 
@@ -34,7 +31,7 @@ const miniAppEmbed = {
 };
 
 export const metadata: Metadata = {
-  title: "CasterCycle - Daily Farcaster E-Bike Dash",
+  title: "CasterCycle E-Bike Dash",
   description:
     "Ride today's forward-scrolling e-bike route, post your score, and challenge Farcaster friends.",
   manifest: "/manifest.json",
@@ -44,7 +41,7 @@ export const metadata: Metadata = {
     apple: "/media/castercycle.png",
   },
   openGraph: {
-    title: "CasterCycle - Daily Farcaster E-Bike Dash",
+    title: "CasterCycle E-Bike Dash",
     description:
       "One daily e-bike route. Grab charge, clear hazards, and share the score to beat.",
     url: appDomain,

@@ -9,7 +9,7 @@ const BLOCKED_COUNTRIES = new Set([
 
 const BLOCKED_US_REGIONS = new Set(["NY"]);
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   if (pathname === "/blocked" || pathname.startsWith("/api/")) {

@@ -7,25 +7,26 @@
   "miniapp": {
     "version": "1",
     "name": "CasterCycle",
-    "iconUrl": "https://ebikecaster.vercel.app/media/castercycle.png",
-    "homeUrl": "https://ebikecaster.vercel.app/",
-    "imageUrl": "https://ebikecaster.vercel.app/media/castercycle-card.png",
+    "iconUrl": "https://castercycle.vercel.app/media/castercycle.png",
+    "homeUrl": "https://castercycle.vercel.app/",
+    "imageUrl": "https://castercycle.vercel.app/media/castercycle-card.png",
     "buttonTitle": "Ride CasterCycle",
-    "splashImageUrl": "https://ebikecaster.vercel.app/media/castercycle.png",
+    "splashImageUrl": "https://castercycle.vercel.app/media/castercycle.png",
     "splashBackgroundColor": "#101b26",
     "subtitle": "Daily e-bike score run",
     "description": "Ride a daily forward-scrolling e-bike route, dodge street hazards, collect charge, unlock skins, and share the score to beat.",
     "screenshotUrls": [
-      "https://ebikecaster.vercel.app/media/castercycle-screenshot-ready.png",
-      "https://ebikecaster.vercel.app/media/castercycle-screenshot-ride.png"
+      "https://castercycle.vercel.app/media/castercycle-screenshot-ready.png",
+      "https://castercycle.vercel.app/media/castercycle-screenshot-ride.png",
+      "https://castercycle.vercel.app/media/castercycle-screenshot-result.png"
     ],
     "primaryCategory": "games",
     "tags": ["game", "ebike", "daily", "farcaster", "base"],
-    "heroImageUrl": "https://ebikecaster.vercel.app/media/castercycle-hero.png",
+    "heroImageUrl": "https://castercycle.vercel.app/media/castercycle-hero.png",
     "tagline": "Daily e-bike dash.",
-    "ogTitle": "CasterCycle - Daily Farcaster E-Bike Dash",
+    "ogTitle": "CasterCycle E-Bike Dash",
     "ogDescription": "One daily e-bike route. Ride, score, unlock skins, and challenge Farcaster friends.",
-    "ogImageUrl": "https://ebikecaster.vercel.app/media/castercycle-hero.png",
-    "castShareUrl": "https://ebikecaster.vercel.app/"
+    "ogImageUrl": "https://castercycle.vercel.app/media/castercycle-hero.png",
+    "castShareUrl": "https://castercycle.vercel.app/"
   }
 }

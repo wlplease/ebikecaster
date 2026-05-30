@@ -28,22 +28,23 @@ import { parseEther } from "viem";
 import { useAccount, useConnect, useReadContract, useSendTransaction, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { useFarcasterUser } from "@/components/farcaster-gate";
 import {
-  DAILY_PRICE,
   PRO_PASS_ABI,
   PRO_PASS_CONTRACT,
   USDC_ABI,
   USDC_CONTRACT,
   WEEKLY_PRICE,
+  YEARLY_PRICE,
   formatProExpiry,
   useProStatus,
 } from "@/lib/pro-pass";
 
-const APP_URL = "https://ebikecaster.vercel.app";
+const APP_URL = "https://castercycle.vercel.app";
 const TREASURY_ADDRESS = process.env.NEXT_PUBLIC_TREASURY_ADDRESS as `0x${string}` | undefined;
 const ETH_ADDRESS_REGEX_CLIENT = /^0x[0-9a-f]{40}$/i;
 const COURSE_LENGTH = 4200;
 const VIEW_DISTANCE = 1180;
 const STORAGE_PREFIX = "castercycle";
+const YEAR_SECONDS = 365 * 24 * 60 * 60;
 
 type RidePhase = "ready" | "riding" | "finished";
 type Lane = -1 | 0 | 1;
@@ -350,6 +351,7 @@ export default function CasterCycleApp() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
   const [leaderboardScope, setLeaderboardScope] = useState<LeaderboardScope>("global");
   const [ethSupporter, setEthSupporter] = useState(false);
+  const [annualUntil, setAnnualUntil] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
 
@@ -357,15 +359,17 @@ export default function CasterCycleApp() {
   const skin = SKINS.find((item) => item.id === selectedSkin) ?? SKINS[0];
   const displayName = user?.username ? `@${user.username}` : isStandalone ? "browser rider" : "farcaster rider";
   const progress = clamp(hud.distance / COURSE_LENGTH, 0, 1);
+  const annualActive = annualUntil > Math.floor(Date.now() / 1000);
+  const effectivePro = isPro || annualActive;
 
   const skinUnlocked = useCallback((item: Skin) => {
     if (item.unlock === "base") return true;
-    if (item.unlock === "pro") return isPro;
+    if (item.unlock === "pro") return effectivePro;
     if (item.unlock === "supporter") return ethSupporter;
     if (item.unlock === "streak") return stats.streak >= 3;
     if (item.unlock === "score") return Math.max(stats.bestAll, hud.score) >= 5000;
     return false;
-  }, [ethSupporter, hud.score, isPro, stats.bestAll, stats.streak]);
+  }, [effectivePro, ethSupporter, hud.score, stats.bestAll, stats.streak]);
 
   const loadStats = useCallback((dateKey: string) => {
     try {
@@ -378,6 +382,7 @@ export default function CasterCycleApp() {
       const savedSkin = localStorage.getItem(`${STORAGE_PREFIX}:skin`);
       if (savedSkin && SKINS.some((item) => item.id === savedSkin)) setSelectedSkin(savedSkin);
       setEthSupporter(localStorage.getItem(`${STORAGE_PREFIX}:ethSupporter`) === "1");
+      setAnnualUntil(Number(localStorage.getItem(`${STORAGE_PREFIX}:annualUntil`) || "0"));
     } catch {}
   }, []);
 
@@ -552,6 +557,18 @@ export default function CasterCycleApp() {
       localStorage.setItem(`${STORAGE_PREFIX}:skin`, "spark");
     } catch {}
     setSelectedSkin("spark");
+  }, []);
+
+  const unlockAnnualPass = useCallback(() => {
+    const until = Math.floor(Date.now() / 1000) + YEAR_SECONDS;
+    setAnnualUntil(until);
+    try {
+      localStorage.setItem(`${STORAGE_PREFIX}:annualUntil`, String(until));
+      localStorage.setItem(`${STORAGE_PREFIX}:skin`, "carbon");
+    } catch {}
+    setSelectedSkin("carbon");
+    setToast("Year pass active");
+    haptic("success");
   }, []);
 
   useEffect(() => {
@@ -855,15 +872,17 @@ export default function CasterCycleApp() {
               </button>
               <div className="flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/15 bg-white/8 px-3 text-xs font-black text-white">
                 <ShieldCheck size={15} />
-                {proLoading ? "Checking" : isPro ? formatProExpiry(expiresAt) : "Cycle Pass"}
+                {proLoading ? "Checking" : isPro ? formatProExpiry(expiresAt) : annualActive ? "Year Pass" : "Cycle Pass"}
               </div>
             </div>
 
             <UpgradePanel
               enabled={isConnected}
-              isPro={isPro}
+              isPro={effectivePro}
+              annualActive={annualActive}
               onConnect={connectWallet}
               onEthSupport={unlockEthSupporter}
+              onAnnualPass={unlockAnnualPass}
             />
             <SkinPicker skins={SKINS} selected={selectedSkin} isUnlocked={skinUnlocked} onSelect={setSelectedSkin} />
             <Leaderboard
