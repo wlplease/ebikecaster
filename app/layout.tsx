@@ -4,7 +4,7 @@ import { FarcasterGate } from "@/components/farcaster-gate";
 import { Providers } from "@/components/providers";
 import { Analytics } from "@vercel/analytics/next";
 
-const appDomain = "https://nshellapp.vercel.app";
+const appDomain = process.env.NEXT_PUBLIC_APP_URL || "https://nshellapp.vercel.app";
 
 const accountAssociation = {
   header:
@@ -15,35 +15,35 @@ const accountAssociation = {
 
 const miniAppEmbed = {
   version: "1",
-  imageUrl: `${appDomain}/media/nshell.png`,
+  imageUrl: `${appDomain}/media/voltlane.png`,
   button: {
-    title: "nSh3//",
+    title: "Ride VoltLane",
     action: {
       type: "launch_miniapp" as const,
-      name: "nshell",
+      name: "VoltLane",
       url: appDomain,
-      splashImageUrl: `${appDomain}/media/nshell.png`,
-      splashBackgroundColor: "#0a0a0a",
+      splashImageUrl: `${appDomain}/media/voltlane.png`,
+      splashBackgroundColor: "#101b26",
     },
   },
 };
 
 export const metadata: Metadata = {
-  title: "nSh3// — command the graph",
+  title: "VoltLane - Daily E-Bike Dash",
   description:
-    "A terminal interface for Farcaster. Type commands, pipe data, explore the social graph. Less app, more cockpit.",
+    "Ride today's side-scrolling e-bike route, post your score, and challenge Farcaster friends.",
   manifest: "/manifest.json",
   icons: {
-    icon: "/media/nshell.png",
-    shortcut: "/media/nshell.png",
-    apple: "/media/nshell.png",
+    icon: "/media/voltlane.png",
+    shortcut: "/media/voltlane.png",
+    apple: "/media/voltlane.png",
   },
   openGraph: {
-    title: "nSh3// — command the graph",
+    title: "VoltLane - Daily E-Bike Dash",
     description:
-      "Terminal for the protocol. ssh for social.",
+      "One daily e-bike route. Grab charge, clear hazards, and share the score to beat.",
     url: appDomain,
-    images: [{ url: `${appDomain}/media/nshell.png` }],
+    images: [{ url: `${appDomain}/media/voltlane.png` }],
   },
   other: {
     "fc:miniapp": JSON.stringify(miniAppEmbed),

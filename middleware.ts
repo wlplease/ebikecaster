@@ -38,7 +38,7 @@ export function middleware(request: NextRequest) {
   response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   response.headers.set(
     "Content-Security-Policy",
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https://*.neynar.com https://*.base.org https://*.alchemy.com; frame-src 'self' https://*.farcaster.xyz; frame-ancestors 'self' https://*.farcaster.xyz https://farcaster.xyz;",
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https://auth.farcaster.xyz https://*.neynar.com https://*.base.org https://*.alchemy.com; frame-src 'self' https://*.farcaster.xyz; frame-ancestors 'self' https://*.farcaster.xyz https://farcaster.xyz;",
   );
 
   return response;

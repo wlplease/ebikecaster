@@ -1,32 +1,10 @@
 "use client";
 
-import { useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 
 export default function BlockedPage() {
   const searchParams = useSearchParams();
-  const country = searchParams.get("c") || "??";
-
-  // Log blocked attempt to Firebase (fire-and-forget)
-  useEffect(() => {
-    import("@/lib/firebase").then(({ db, doc, setDoc, serverTimestamp, increment }) => {
-      const id = `${country}-${Date.now()}`;
-      const ref = doc(db, "nshell-blocked", id);
-      setDoc(ref, {
-        country,
-        timestamp: serverTimestamp(),
-        userAgent: navigator.userAgent || "",
-      }).catch(() => {});
-
-      // Also update a counter doc per country
-      const countRef = doc(db, "nshell-blocked", `count-${country}`);
-      setDoc(countRef, {
-        country,
-        count: increment(1),
-        lastAttempt: serverTimestamp(),
-      }, { merge: true }).catch(() => {});
-    }).catch(() => {});
-  }, [country]);
+  const country = searchParams.get("c") || "restricted region";
 
   return (
     <div
@@ -35,9 +13,9 @@ export default function BlockedPage() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: "#0a0a0a",
-        color: "#a1a1aa",
-        fontFamily: "monospace",
+        backgroundColor: "#101b26",
+        color: "rgba(255,255,255,0.72)",
+        fontFamily: "Inter, system-ui, sans-serif",
         padding: "24px",
       }}
     >
@@ -46,18 +24,18 @@ export default function BlockedPage() {
           style={{
             width: 56,
             height: 56,
-            borderRadius: 14,
-            backgroundColor: "#F7931A",
+            borderRadius: 12,
+            backgroundColor: "#fbe764",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             margin: "0 auto 20px",
             fontSize: 28,
             fontWeight: 900,
-            color: "#fff",
+            color: "#111923",
           }}
         >
-          N
+          V
         </div>
         <h1
           style={{
@@ -65,18 +43,17 @@ export default function BlockedPage() {
             fontWeight: 900,
             textTransform: "uppercase",
             letterSpacing: "0.1em",
-            color: "#F7931A",
+            color: "#fbe764",
             marginBottom: 12,
           }}
         >
           Access Restricted
         </h1>
-        <p style={{ fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>
-          nshell is not available in your region due to regulatory restrictions.
+        <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 16 }}>
+          VoltLane is not available in {country} due to sanctions or regional compliance restrictions.
         </p>
-        <p style={{ fontSize: 10, color: "#52525b" }}>
-          This application complies with applicable sanctions regulations and cannot
-          be accessed from certain jurisdictions.
+        <p style={{ fontSize: 11, color: "rgba(255,255,255,0.42)" }}>
+          This app does not offer cash prizes, withdrawals, gambling, custody, or token rewards.
         </p>
       </div>
     </div>

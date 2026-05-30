@@ -1,16 +1,16 @@
 {
-  "name": "nSh3//",
-  "short_name": "nSh3//",
-  "description": "command the graph. a terminal for the farcaster protocol.",
+  "name": "VoltLane",
+  "short_name": "VoltLane",
+  "description": "A daily side-scrolling e-bike ride for Farcaster.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0a0a",
-  "theme_color": "#00ff41",
+  "background_color": "#101b26",
+  "theme_color": "#fbe764",
   "orientation": "portrait",
   "icons": [
     {
-      "src": "/media/nshell.png",
-      "sizes": "192x192",
+      "src": "/media/voltlane.png",
+      "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "any maskable"
     }

@@ -1,11 +1,10 @@
-// FarTurf — Daily & Weekly Access Passes (USDC on Base)
+// VoltLane - Daily and weekly access passes (USDC on Base)
 
 import { useReadContract } from "wagmi";
-import { useState, useEffect } from "react";
 
 // ── Contract Addresses ──
 
-/** FarTurf contract on Base (new daily/weekly pass system) */
+/** VoltLane pass contract on Base (daily/weekly pass system) */
 export const PRO_PASS_CONTRACT = "0xa6c2e5ea11923f44839412d1f36026fb2f5af014" as `0x${string}`;
 
 /** Legacy ProPass contract — grandfathered monthly subscribers */
@@ -22,7 +21,7 @@ export const DAILY_PRICE = 500_000;
 /** Weekly pass price: $2.00 = 2,000,000 */
 export const WEEKLY_PRICE = 2_000_000;
 
-// ── FarTurf ABI ──
+// VoltLane pass ABI
 
 export const PRO_PASS_ABI = [
   // Constructor
@@ -325,32 +324,10 @@ export const USDC_ABI = [
 ] as const;
 
 // ── Hook: useProStatus ──
-// Checks BOTH new FarTurf AND legacy ProPass for grandfathered monthly subscribers
-
-let _trialCache: { address: string; until: number; ts: number } | null = null;
-
-async function checkProTrial(address: string): Promise<number> {
-  const addr = address.toLowerCase();
-  if (_trialCache && _trialCache.address === addr && Date.now() - _trialCache.ts < 300_000) {
-    return _trialCache.until;
-  }
-  try {
-    const { getDoc } = await import("@/lib/firebase");
-    const { doc, db } = await import("@/lib/firebase");
-    const ref = doc(db, "nshell-pro-trials", addr);
-    const snap = await getDoc(ref);
-    const until = snap.exists() ? (snap.data().expiresAt || 0) : 0;
-    _trialCache = { address: addr, until, ts: Date.now() };
-    return until;
-  } catch {
-    return 0;
-  }
-}
+// Checks BOTH the current VoltLane pass and legacy ProPass for grandfathered subscribers.
 
 export function useProStatus(address?: string) {
-  const [trialExpiry, setTrialExpiry] = useState(0);
-
-  // New contract: FarTurf
+  // Current VoltLane pass contract.
   const { data: isActiveData, isLoading: loadingActive } = useReadContract({
     address: PRO_PASS_CONTRACT,
     abi: PRO_PASS_ABI,
@@ -384,34 +361,25 @@ export function useProStatus(address?: string) {
     query: { enabled: !!address, refetchInterval: false },
   });
 
-  // Firebase-based Pro trial
-  useEffect(() => {
-    if (!address) return;
-    checkProTrial(address).then(setTrialExpiry).catch(() => {});
-  }, [address]);
-
   const newContractPro = isActiveData === true;
   const newContractExpiry = expiresAtData ? Number(expiresAtData) : 0;
   const legacyPro = legacyActiveData === true;
   const legacyExpiry = legacyExpiryData ? Number(legacyExpiryData) : 0;
-  const trialActive = trialExpiry > Date.now();
 
-  const isPro = newContractPro || legacyPro || trialActive;
+  const isPro = newContractPro || legacyPro;
 
   // Use the latest expiry from whichever source is active
   const expiry = newContractPro
     ? newContractExpiry
     : legacyPro
       ? legacyExpiry
-      : trialActive
-        ? Math.floor(trialExpiry / 1000)
-        : 0;
+      : 0;
 
   return {
     isPro,
     expiresAt: expiry,
     loading: loadingActive || loadingExpiry || loadingLegacy,
-    isTrial: trialActive && !newContractPro && !legacyPro,
+    isTrial: false,
     isLegacy: legacyPro && !newContractPro,
   };
 }

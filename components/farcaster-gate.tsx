@@ -51,9 +51,9 @@ export function FarcasterGate({ children }: { children: React.ReactNode }) {
       try {
         const ctx = (await (sdk as unknown as {
           context:
-            | Promise<{ user?: { fid: number; username?: string; displayName?: string; pfpUrl?: string }; client?: { safeAreaInsets?: SafeAreaInsets } }>
-            | { user?: { fid: number; username?: string; displayName?: string; pfpUrl?: string }; client?: { safeAreaInsets?: SafeAreaInsets } };
-        }).context) as { user?: { fid: number; username?: string; displayName?: string; pfpUrl?: string }; client?: { safeAreaInsets?: SafeAreaInsets } };
+            | Promise<{ user?: FarcasterUser; client?: { safeAreaInsets?: SafeAreaInsets } }>
+            | { user?: FarcasterUser; client?: { safeAreaInsets?: SafeAreaInsets } };
+        }).context) as { user?: FarcasterUser; client?: { safeAreaInsets?: SafeAreaInsets } };
 
         if (cancelled) return;
         clearTimeout(timeout);
@@ -82,31 +82,29 @@ export function FarcasterGate({ children }: { children: React.ReactNode }) {
       cancelled = true;
       clearTimeout(timeout);
     };
-  }, []);
+  }, [failed, ready]);
 
-  // Loading — nshell boot sequence
   if (!ready && !failed) {
     return (
-      <div className="flex h-dvh w-full max-w-[520px] mx-auto items-center justify-center bg-[#0a0a0a]">
+      <div className="flex h-dvh w-full max-w-[520px] mx-auto items-center justify-center bg-[#101b26]">
         <div className="flex flex-col items-center gap-4">
-          <div className="font-mono text-2xl font-bold tracking-tight">
-            <span className="text-emerald-400">nSh3</span>
-            <span className="text-emerald-600">//</span>
+          <div className="text-3xl font-black tracking-tight">
+            <span className="text-[#fbe764]">Volt</span>
+            <span className="text-[#7cf2ff]">Lane</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" style={{ animationDelay: "0.15s" }} />
-            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" style={{ animationDelay: "0.3s" }} />
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#fbe764]" />
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#7cf2ff]" style={{ animationDelay: "0.15s" }} />
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#ff6b6b]" style={{ animationDelay: "0.3s" }} />
           </div>
-          <span className="text-[10px] text-emerald-900 font-mono tracking-[0.2em] uppercase">
-            initializing protocol
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/45">
+            loading daily route
           </span>
         </div>
       </div>
     );
   }
 
-  // Not in Farcaster — standalone browser
   if (failed) {
     return (
       <FarcasterContext.Provider value={{ user: null, ready: true, safeAreaInsets: DEFAULT_INSETS, isStandalone: true }}>
