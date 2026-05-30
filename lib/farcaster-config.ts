@@ -7,6 +7,8 @@ export type AccountAssociation = {
 };
 
 export const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://castercycle.vercel.app";
+export const FARCASTER_SHARE_URL =
+  process.env.NEXT_PUBLIC_SHARE_URL || "https://farcaster.xyz/miniapps/_U8dgupnJBvv/castercycle";
 
 const CASTER_CYCLE_ACCOUNT_ASSOCIATION: AccountAssociation = {
   header: "eyJmaWQiOjEwNTkwNzUsInR5cGUiOiJhdXRoIiwia2V5IjoiMHg3NmJDNzVFZjJGMWYwRjI1ZTA3ODY0MTkxMEQ4RTIzQTQzMDIwNEY1In0",

@@ -17,6 +17,9 @@ type FarcasterContextType = {
   ready: boolean;
   safeAreaInsets: SafeAreaInsets;
   isStandalone: boolean;
+  miniAppAdded: boolean;
+  hapticsEnabled: boolean;
+  setMiniAppAdded: (added: boolean) => void;
 };
 
 const DEFAULT_INSETS: SafeAreaInsets = { top: 0, bottom: 0, left: 0, right: 0 };
@@ -26,6 +29,9 @@ const FarcasterContext = createContext<FarcasterContextType>({
   ready: false,
   safeAreaInsets: DEFAULT_INSETS,
   isStandalone: false,
+  miniAppAdded: false,
+  hapticsEnabled: false,
+  setMiniAppAdded: () => {},
 });
 
 export function useFarcasterUser() {
@@ -37,6 +43,8 @@ export function FarcasterGate({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [safeAreaInsets, setSafeAreaInsets] = useState<SafeAreaInsets>(DEFAULT_INSETS);
+  const [miniAppAdded, setMiniAppAdded] = useState(false);
+  const [hapticsEnabled, setHapticsEnabled] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,9 +59,9 @@ export function FarcasterGate({ children }: { children: React.ReactNode }) {
       try {
         const ctx = (await (sdk as unknown as {
           context:
-            | Promise<{ user?: FarcasterUser; client?: { safeAreaInsets?: SafeAreaInsets } }>
-            | { user?: FarcasterUser; client?: { safeAreaInsets?: SafeAreaInsets } };
-        }).context) as { user?: FarcasterUser; client?: { safeAreaInsets?: SafeAreaInsets } };
+            | Promise<{ user?: FarcasterUser; client?: { added?: boolean; safeAreaInsets?: SafeAreaInsets }; features?: { haptics?: boolean } }>
+            | { user?: FarcasterUser; client?: { added?: boolean; safeAreaInsets?: SafeAreaInsets }; features?: { haptics?: boolean } };
+        }).context) as { user?: FarcasterUser; client?: { added?: boolean; safeAreaInsets?: SafeAreaInsets }; features?: { haptics?: boolean } };
 
         if (cancelled) return;
         clearTimeout(timeout);
@@ -61,6 +69,8 @@ export function FarcasterGate({ children }: { children: React.ReactNode }) {
         if (ctx?.client?.safeAreaInsets) {
           setSafeAreaInsets(ctx.client.safeAreaInsets);
         }
+        setMiniAppAdded(ctx?.client?.added === true);
+        setHapticsEnabled(ctx?.features?.haptics === true);
 
         if (ctx?.user?.fid) {
           setUser({
@@ -107,14 +117,24 @@ export function FarcasterGate({ children }: { children: React.ReactNode }) {
 
   if (failed) {
     return (
-      <FarcasterContext.Provider value={{ user: null, ready: true, safeAreaInsets: DEFAULT_INSETS, isStandalone: true }}>
+      <FarcasterContext.Provider
+        value={{
+          user: null,
+          ready: true,
+          safeAreaInsets: DEFAULT_INSETS,
+          isStandalone: true,
+          miniAppAdded: false,
+          hapticsEnabled: false,
+          setMiniAppAdded,
+        }}
+      >
         {children}
       </FarcasterContext.Provider>
     );
   }
 
   return (
-    <FarcasterContext.Provider value={{ user, ready, safeAreaInsets, isStandalone: false }}>
+    <FarcasterContext.Provider value={{ user, ready, safeAreaInsets, isStandalone: false, miniAppAdded, hapticsEnabled, setMiniAppAdded }}>
       {children}
     </FarcasterContext.Provider>
   );

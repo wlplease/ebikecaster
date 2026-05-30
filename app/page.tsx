@@ -29,26 +29,27 @@ import {
 } from "lucide-react";
 import { sdk } from "@farcaster/miniapp-sdk";
 import { parseEther } from "viem";
-import { useAccount, useConnect, useReadContract, useSendTransaction, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
+import { useAccount, useChainId, useConnect, useReadContract, useSendTransaction, useSwitchChain, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { useFarcasterUser } from "@/components/farcaster-gate";
 import { CASTER_CREDITS_ABI, CASTER_CREDITS_CONTRACT, type RewardClaimPayload } from "@/lib/reward-credits";
 import {
-  PRO_PASS_ABI,
-  PRO_PASS_CONTRACT,
+  BASE_CHAIN_ID,
+  ETH_SUPPORT_AMOUNT,
+  TREASURY_ADDRESS,
   USDC_ABI,
   USDC_CONTRACT,
   WEEKLY_PRICE,
   YEARLY_PRICE,
-  formatProExpiry,
-  useProStatus,
+  formatPassExpiry,
 } from "@/lib/pro-pass";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://castercycle.vercel.app";
-const TREASURY_ADDRESS = process.env.NEXT_PUBLIC_TREASURY_ADDRESS as `0x${string}` | undefined;
+const SHARE_URL = process.env.NEXT_PUBLIC_SHARE_URL || "https://farcaster.xyz/miniapps/_U8dgupnJBvv/castercycle";
 const ETH_ADDRESS_REGEX_CLIENT = /^0x[0-9a-f]{40}$/i;
 const COURSE_LENGTH = 4200;
 const VIEW_DISTANCE = 1180;
 const STORAGE_PREFIX = "castercycle";
+const WEEK_SECONDS = 7 * 24 * 60 * 60;
 const YEAR_SECONDS = 365 * 24 * 60 * 60;
 
 type RidePhase = "ready" | "riding" | "finished";
@@ -58,6 +59,7 @@ type LeaderboardScope = "global" | "friends";
 type MissionKind = "combo" | "clean" | "boosts" | "battery" | "bolts";
 type SfxId = "start" | "lane" | "bolt" | "boost" | "hit" | "clear" | "finish";
 type VoiceLineId = "ready" | "start" | "boost" | "mission" | "finish" | "claim";
+type HapticKind = "selection" | "light" | "medium" | "heavy" | "success" | "warning" | "error";
 
 type RouteTheme = {
   name: string;
@@ -424,19 +426,23 @@ function skinShortName(name: string) {
     .replace(" Pro", "");
 }
 
-function haptic(kind: "light" | "medium" | "success" | "error") {
+let farcasterHapticsEnabled = false;
+
+function haptic(kind: HapticKind) {
+  if (!farcasterHapticsEnabled) return;
   try {
-    if (kind === "success") sdk.haptics.notificationOccurred("success");
+    if (kind === "selection") sdk.haptics.selectionChanged();
+    else if (kind === "success") sdk.haptics.notificationOccurred("success");
+    else if (kind === "warning") sdk.haptics.notificationOccurred("warning");
     else if (kind === "error") sdk.haptics.notificationOccurred("error");
     else sdk.haptics.impactOccurred(kind);
   } catch {}
 }
 
 export default function CasterCycleApp() {
-  const { user, safeAreaInsets, isStandalone } = useFarcasterUser();
+  const { user, safeAreaInsets, isStandalone, miniAppAdded, hapticsEnabled, setMiniAppAdded } = useFarcasterUser();
   const { address, isConnected } = useAccount();
   const { connectors, connect, isPending: connecting } = useConnect();
-  const { isPro, expiresAt, loading: proLoading } = useProStatus(address ?? undefined);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<GameModel>(makeGame());
@@ -451,9 +457,13 @@ export default function CasterCycleApp() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
   const [leaderboardScope, setLeaderboardScope] = useState<LeaderboardScope>("global");
   const [ethSupporter, setEthSupporter] = useState(false);
+  const [weeklyUntil, setWeeklyUntil] = useState(0);
   const [annualUntil, setAnnualUntil] = useState(0);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [showIntro, setShowIntro] = useState(false);
+  const [showWelcomeBack, setShowWelcomeBack] = useState(false);
+  const [introStep, setIntroStep] = useState(0);
   const [toast, setToast] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
 
@@ -462,8 +472,10 @@ export default function CasterCycleApp() {
   const displayName = user?.username ? `@${user.username}` : isStandalone ? "browser rider" : "farcaster rider";
   const progress = clamp(hud.distance / COURSE_LENGTH, 0, 1);
   const mission = missionStatus(game);
+  const weeklyActive = weeklyUntil > Math.floor(Date.now() / 1000);
   const annualActive = annualUntil > Math.floor(Date.now() / 1000);
-  const effectivePro = isPro || annualActive;
+  const effectivePro = weeklyActive || annualActive;
+  const passUntil = Math.max(weeklyUntil, annualUntil);
 
   const skinUnlocked = useCallback((item: Skin) => {
     if (item.unlock === "base") return true;
@@ -485,9 +497,13 @@ export default function CasterCycleApp() {
       const savedSkin = localStorage.getItem(`${STORAGE_PREFIX}:skin`);
       if (savedSkin && SKINS.some((item) => item.id === savedSkin)) setSelectedSkin(savedSkin);
       setEthSupporter(localStorage.getItem(`${STORAGE_PREFIX}:ethSupporter`) === "1");
+      setWeeklyUntil(Number(localStorage.getItem(`${STORAGE_PREFIX}:weeklyUntil`) || "0"));
       setAnnualUntil(Number(localStorage.getItem(`${STORAGE_PREFIX}:annualUntil`) || "0"));
       setAudioEnabled(localStorage.getItem(`${STORAGE_PREFIX}:audio`) === "1");
       setVoiceEnabled(localStorage.getItem(`${STORAGE_PREFIX}:voice`) === "1");
+      const introSeen = localStorage.getItem(`${STORAGE_PREFIX}:introSeen`) === "1";
+      setShowIntro(!introSeen);
+      setShowWelcomeBack(introSeen);
     } catch {}
   }, []);
 
@@ -667,7 +683,7 @@ export default function CasterCycleApp() {
     gameRef.current = makeGame();
     loadStats(gameRef.current.dateKey);
     syncHud();
-    haptic("light");
+    haptic("selection");
   }, [loadStats, syncHud]);
 
   const startRide = useCallback(() => {
@@ -686,6 +702,28 @@ export default function CasterCycleApp() {
       playVoice("start", { route: gameRef.current.route.name });
     }
   }, [playSfx, playVoice, primeAudio, resetRide, syncHud]);
+
+  const closeIntro = useCallback((ride = false) => {
+    setShowIntro(false);
+    setShowWelcomeBack(!miniAppAdded);
+    setIntroStep(0);
+    try {
+      localStorage.setItem(`${STORAGE_PREFIX}:introSeen`, "1");
+    } catch {}
+    if (ride) requestAnimationFrame(() => startRide());
+  }, [miniAppAdded, startRide]);
+
+  const addMiniApp = useCallback(async () => {
+    try {
+      await sdk.actions.addMiniApp();
+      setMiniAppAdded(true);
+      setShowWelcomeBack(false);
+      setToast("CasterCycle saved");
+      haptic("success");
+    } catch {
+      setToast("Add from Farcaster");
+    }
+  }, [setMiniAppAdded]);
 
   const changeLane = useCallback((direction: -1 | 1) => {
     const current = gameRef.current;
@@ -715,28 +753,59 @@ export default function CasterCycleApp() {
     }
   }, [playSfx, startRide]);
 
+  const shareCast = useCallback(async (text: string, embeds: [] | [string] | [string, string], copiedText = "Share copied") => {
+    try {
+      await sdk.actions.composeCast({ text, embeds });
+      setToast("Cast composer opened");
+      haptic("success");
+      return;
+    } catch {}
+
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "CasterCycle", text, url: SHARE_URL });
+        setToast("Share sheet opened");
+        return;
+      }
+    } catch {}
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setToast(copiedText);
+    } catch {
+      try {
+        await sdk.actions.openUrl(SHARE_URL);
+        setToast("Opening CasterCycle");
+      } catch {
+        setToast("Share failed");
+      }
+    }
+  }, []);
+
+  const shareApp = useCallback(async () => {
+    const current = gameRef.current;
+    const castText = `I'm riding today's ${current.route.name} in CasterCycle.\n\nDaily e-bike score run, Farcaster leaderboard, and Base credits:\n${SHARE_URL}`;
+    setSharing(true);
+    try {
+      await shareCast(castText, [`${APP_URL}/media/castercycle-card.png`, SHARE_URL], "Invite copied");
+    } finally {
+      setSharing(false);
+    }
+  }, [shareCast]);
+
   const shareRide = useCallback(async () => {
     const current = gameRef.current;
     const mission = missionStatus(current);
     const missionText = mission.done ? `\nDaily mission cleared: ${current.mission.title}.` : "";
-    const shareUrl = `${APP_URL}/api/share-image?score=${current.score}&route=${encodeURIComponent(current.route.name)}&user=${encodeURIComponent(displayName)}&skin=${encodeURIComponent(skin.name)}&date=${current.dateKey}&mission=${encodeURIComponent(mission.done ? `${current.mission.title} cleared` : current.mission.goal)}`;
-    const castText = `I scored ${current.score.toLocaleString()} on today's ${current.route.name} in CasterCycle.${missionText}\n\n${current.pickups} charge bolts, ${current.boosts} boosts, ${Math.round(current.battery)}% battery left. Beat my ride:\n${APP_URL}`;
+    const shareImageUrl = `${APP_URL}/api/share-image?score=${current.score}&route=${encodeURIComponent(current.route.name)}&user=${encodeURIComponent(displayName)}&skin=${encodeURIComponent(skin.name)}&date=${current.dateKey}&mission=${encodeURIComponent(mission.done ? `${current.mission.title} cleared` : current.mission.goal)}`;
+    const castText = `I scored ${current.score.toLocaleString()} on today's ${current.route.name} in CasterCycle.${missionText}\n\n${current.pickups} charge bolts, ${current.boosts} boosts, ${Math.round(current.battery)}% battery left. Beat my ride:\n${SHARE_URL}`;
     setSharing(true);
     try {
-      await sdk.actions.composeCast({ text: castText, embeds: [shareUrl] });
-      setToast("Cast composer opened");
-      haptic("success");
-    } catch {
-      try {
-        await navigator.clipboard.writeText(castText);
-        setToast("Ride copied");
-      } catch {
-        setToast("Share failed");
-      }
+      await shareCast(castText, [shareImageUrl, SHARE_URL], "Ride copied");
     } finally {
       setSharing(false);
     }
-  }, [displayName, skin.name]);
+  }, [displayName, shareCast, skin.name]);
 
   const connectWallet = useCallback(() => {
     const connector = connectors.find((item) => item.id.toLowerCase().includes("farcaster")) ?? connectors[0];
@@ -752,15 +821,18 @@ export default function CasterCycleApp() {
     setSelectedSkin("spark");
   }, []);
 
-  const unlockAnnualPass = useCallback(() => {
-    const until = Math.floor(Date.now() / 1000) + YEAR_SECONDS;
-    setAnnualUntil(until);
+  const unlockPass = useCallback((plan: "weekly" | "yearly") => {
+    const key = plan === "weekly" ? "weeklyUntil" : "annualUntil";
+    const seconds = plan === "weekly" ? WEEK_SECONDS : YEAR_SECONDS;
+    const until = Math.floor(Date.now() / 1000) + seconds;
+    if (plan === "weekly") setWeeklyUntil(until);
+    else setAnnualUntil(until);
     try {
-      localStorage.setItem(`${STORAGE_PREFIX}:annualUntil`, String(until));
+      localStorage.setItem(`${STORAGE_PREFIX}:${key}`, String(until));
       localStorage.setItem(`${STORAGE_PREFIX}:skin`, "carbon");
     } catch {}
     setSelectedSkin("carbon");
-    setToast("Year pass active");
+    setToast(plan === "weekly" ? "Weekly pass active" : "Year pass active");
     haptic("success");
   }, []);
 
@@ -768,6 +840,10 @@ export default function CasterCycleApp() {
     loadStats(gameRef.current.dateKey);
     loadLeaderboard("global");
   }, [loadLeaderboard, loadStats]);
+
+  useEffect(() => {
+    farcasterHapticsEnabled = hapticsEnabled;
+  }, [hapticsEnabled]);
 
   useEffect(() => {
     try {
@@ -829,6 +905,10 @@ export default function CasterCycleApp() {
     const id = window.setTimeout(() => setToast(null), 1800);
     return () => window.clearTimeout(id);
   }, [toast]);
+
+  useEffect(() => {
+    if (miniAppAdded) setShowWelcomeBack(false);
+  }, [miniAppAdded]);
 
   useEffect(() => {
     const step = (now: number) => {
@@ -1079,6 +1159,27 @@ export default function CasterCycleApp() {
       {hud.phase !== "riding" && (
         <section className="pointer-events-auto absolute inset-x-0 bottom-0 z-20 px-3 pb-3">
           <div className="no-scrollbar max-h-[88dvh] overflow-y-auto overscroll-contain rounded-md border border-white/15 bg-[#111923]/92 p-4 shadow-2xl backdrop-blur-xl">
+            {hud.phase === "ready" && showIntro ? (
+              <OnboardingPanel
+                step={introStep}
+                routeName={game.route.name}
+                miniAppAdded={miniAppAdded}
+                onStep={setIntroStep}
+                onAdd={addMiniApp}
+                onSkip={() => closeIntro(false)}
+                onStart={() => closeIntro(true)}
+              />
+            ) : hud.phase === "ready" && showWelcomeBack && !miniAppAdded ? (
+              <WelcomeBackPanel
+                displayName={displayName}
+                routeName={game.route.name}
+                onAdd={addMiniApp}
+                onDismiss={() => setShowWelcomeBack(false)}
+                onShare={shareApp}
+                onStart={startRide}
+              />
+            ) : (
+              <>
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[#7cf2ff]">{resultLabel}</div>
@@ -1142,11 +1243,11 @@ export default function CasterCycleApp() {
               </button>
               <button
                 className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-4 text-sm font-black text-[#111923] transition active:scale-[0.98] disabled:opacity-70"
-                disabled={hud.phase !== "finished" || sharing}
-                onClick={shareRide}
+                disabled={sharing}
+                onClick={hud.phase === "finished" ? shareRide : shareApp}
               >
                 <Share2 size={18} />
-                {sharing ? "Opening" : "Share"}
+                {sharing ? "Opening" : hud.phase === "finished" ? "Share" : "Invite"}
               </button>
             </div>
 
@@ -1161,27 +1262,31 @@ export default function CasterCycleApp() {
               </button>
               <div className="flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/15 bg-white/8 px-3 text-xs font-black text-white">
                 <ShieldCheck size={15} />
-                {proLoading ? "Checking" : isPro ? formatProExpiry(expiresAt) : annualActive ? "Year Pass" : "Cycle Pass"}
+                {effectivePro ? formatPassExpiry(passUntil) : "Cycle Pass"}
               </div>
             </div>
 
             <UpgradePanel
               enabled={isConnected}
               isPro={effectivePro}
+              weeklyActive={weeklyActive}
               annualActive={annualActive}
               onConnect={connectWallet}
               onEthSupport={unlockEthSupporter}
-              onAnnualPass={unlockAnnualPass}
+              onPassPurchased={unlockPass}
             />
             <SkinPicker skins={SKINS} selected={selectedSkin} isUnlocked={skinUnlocked} onSelect={setSelectedSkin} />
             <Leaderboard
               rows={leaderboard}
               scope={leaderboardScope}
+              onProfile={(fid) => sdk.actions.viewProfile({ fid }).catch(() => setToast("Open in Farcaster"))}
               onScope={(scope) => {
                 setLeaderboardScope(scope);
                 loadLeaderboard(scope);
               }}
             />
+              </>
+            )}
           </div>
         </section>
       )}
@@ -1199,6 +1304,222 @@ export default function CasterCycleApp() {
         </div>
       )}
     </main>
+  );
+}
+
+function OnboardingPanel({
+  step,
+  routeName,
+  miniAppAdded,
+  onStep,
+  onAdd,
+  onSkip,
+  onStart,
+}: {
+  step: number;
+  routeName: string;
+  miniAppAdded: boolean;
+  onStep: (step: number) => void;
+  onAdd: () => void;
+  onSkip: () => void;
+  onStart: () => void;
+}) {
+  const slides = [
+    {
+      icon: <Bike size={22} />,
+      kicker: "Welcome",
+      title: "Ride today's lane.",
+      body: `${routeName} is live for everyone on Farcaster.`,
+      accent: "#fbe764",
+    },
+    {
+      icon: <Zap size={22} />,
+      kicker: "Flow",
+      title: "Dodge. Hop. Boost.",
+      body: "Charge bolts build score. Clean lines build streaks.",
+      accent: "#7cf2ff",
+    },
+    {
+      icon: <Share2 size={22} />,
+      kicker: "Social",
+      title: "Cast the run.",
+      body: "Share scores, chase friends, claim Base credits.",
+      accent: "#a2ff9a",
+    },
+  ];
+  const current = slides[step] ?? slides[0];
+  const isLast = step === slides.length - 1;
+
+  return (
+    <div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[#7cf2ff]">First ride</div>
+          <h1 className="mt-1 text-3xl font-black leading-none tracking-normal text-white">CasterCycle</h1>
+        </div>
+        <Image
+          src="/media/castercycle.png"
+          alt=""
+          width={58}
+          height={58}
+          className="h-[58px] w-[58px] shrink-0 rounded-md border border-white/15 object-cover shadow-lg"
+        />
+      </div>
+
+      <div className="mt-5 rounded-md border border-white/12 bg-white/7 p-4">
+        <div className="flex items-center gap-3">
+          <div
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border text-[#111923]"
+            style={{ background: current.accent, borderColor: current.accent }}
+          >
+            {current.icon}
+          </div>
+          <div className="min-w-0">
+            <div className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: current.accent }}>
+              {current.kicker}
+            </div>
+            <div className="mt-1 text-xl font-black leading-tight text-white">{current.title}</div>
+          </div>
+        </div>
+        <p className="mt-4 text-sm font-semibold leading-5 text-white/68">{current.body}</p>
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        {slides.map((slide, index) => (
+          <button
+            key={slide.kicker}
+            aria-label={`Intro step ${index + 1}`}
+            className="h-2 rounded-full transition"
+            style={{ background: index === step ? slide.accent : "rgba(255,255,255,0.18)" }}
+            onClick={() => {
+              haptic("selection");
+              onStep(index);
+            }}
+          />
+        ))}
+      </div>
+
+      <div className={`mt-5 grid gap-2 ${isLast && !miniAppAdded ? "grid-cols-3" : "grid-cols-2"}`}>
+        <button
+          className="inline-flex min-h-12 items-center justify-center rounded-md border border-white/15 bg-white/8 px-4 text-sm font-black text-white transition active:scale-[0.98]"
+          onClick={() => {
+            haptic("selection");
+            onSkip();
+          }}
+        >
+          Skip
+        </button>
+        {isLast && !miniAppAdded && (
+          <button
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-3 text-xs font-black text-[#111923] transition active:scale-[0.98]"
+            onClick={onAdd}
+          >
+            <Sparkles size={16} />
+            Add
+          </button>
+        )}
+        <button
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#fbe764] px-4 text-sm font-black text-[#111923] transition active:scale-[0.98]"
+          onClick={() => {
+            haptic(isLast ? "medium" : "selection");
+            if (isLast) onStart();
+            else onStep(step + 1);
+          }}
+        >
+          {isLast ? <Play size={18} /> : <ChevronRight size={18} />}
+          {isLast ? "Start Ride" : "Next"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function WelcomeBackPanel({
+  displayName,
+  routeName,
+  onAdd,
+  onDismiss,
+  onShare,
+  onStart,
+}: {
+  displayName: string;
+  routeName: string;
+  onAdd: () => void;
+  onDismiss: () => void;
+  onShare: () => void;
+  onStart: () => void;
+}) {
+  return (
+    <div>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[#7cf2ff]">Welcome back</div>
+          <h1 className="mt-1 text-3xl font-black leading-none tracking-normal text-white">CasterCycle</h1>
+          <p className="mt-2 text-sm font-semibold leading-5 text-white/68">
+            {displayName}, {routeName} is ready.
+          </p>
+        </div>
+        <Image
+          src="/media/castercycle.png"
+          alt=""
+          width={58}
+          height={58}
+          className="h-[58px] w-[58px] shrink-0 rounded-md border border-white/15 object-cover shadow-lg"
+        />
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        <FeatureChip icon={<Zap size={13} />} label="daily" />
+        <FeatureChip icon={<Trophy size={13} />} label="scores" />
+        <FeatureChip icon={<Wallet size={13} />} label="base" />
+      </div>
+
+      <div className="mt-4 rounded-md border border-[#fbe764]/28 bg-[#fbe764]/10 p-3">
+        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#fbe764]">
+          <Sparkles size={13} />
+          Save CasterCycle
+        </div>
+        <p className="mt-1 text-xs font-semibold leading-5 text-white/64">
+          Add it once for faster daily rides.
+        </p>
+      </div>
+
+      <div className="mt-5 grid grid-cols-3 gap-2">
+        <button
+          className="inline-flex min-h-12 items-center justify-center gap-1 rounded-md bg-[#fbe764] px-2 text-xs font-black text-[#111923] transition active:scale-[0.98]"
+          onClick={onAdd}
+        >
+          <Sparkles size={17} />
+          Add
+        </button>
+        <button
+          className="inline-flex min-h-12 items-center justify-center gap-1 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/15 px-2 text-xs font-black text-white transition active:scale-[0.98]"
+          onClick={onShare}
+        >
+          <Share2 size={17} />
+          Invite
+        </button>
+        <button
+          className="inline-flex min-h-12 items-center justify-center gap-1 rounded-md bg-[#7cf2ff] px-2 text-xs font-black text-[#111923] transition active:scale-[0.98]"
+          onClick={() => {
+            haptic("medium");
+            onStart();
+          }}
+        >
+          <Play size={17} />
+          Ride
+        </button>
+      </div>
+      <button
+        className="mt-3 min-h-9 w-full rounded-md border border-white/12 bg-white/7 px-3 text-xs font-black uppercase tracking-[0.1em] text-white/58"
+        onClick={() => {
+          haptic("selection");
+          onDismiss();
+        }}
+      >
+        Not now
+      </button>
+    </div>
   );
 }
 
@@ -1438,7 +1759,10 @@ function SkinPicker({
               }}
               aria-label={`${skin.name}: ${skin.label}`}
               title={`${skin.name}: ${skin.label}`}
-              onClick={() => unlocked && onSelect(skin.id)}
+              onClick={() => {
+                haptic(unlocked ? "selection" : "warning");
+                if (unlocked) onSelect(skin.id);
+              }}
             >
               <span className="mb-1 flex items-center justify-between">
                 <span className="h-3 w-3 rounded-full" style={{ background: skin.frame }} />
@@ -1457,10 +1781,12 @@ function SkinPicker({
 function Leaderboard({
   rows,
   scope,
+  onProfile,
   onScope,
 }: {
   rows: LeaderboardRow[];
   scope: LeaderboardScope;
+  onProfile: (fid: number) => void;
   onScope: (scope: LeaderboardScope) => void;
 }) {
   return (
@@ -1476,7 +1802,10 @@ function Leaderboard({
               key={item}
               className="rounded px-2 py-1 text-[10px] font-black uppercase text-white"
               style={{ background: scope === item ? "rgba(124,242,255,0.25)" : "transparent" }}
-              onClick={() => onScope(item)}
+              onClick={() => {
+                haptic("selection");
+                onScope(item);
+              }}
             >
               {item}
             </button>
@@ -1488,14 +1817,21 @@ function Leaderboard({
           <div className="px-3 py-3 text-xs font-semibold text-white/50">No server scores yet. Finish a ride to seed today.</div>
         ) : (
           rows.slice(0, 5).map((row, index) => (
-            <div key={`${row.fid}-${row.username}-${index}`} className="flex items-center gap-2 border-b border-white/8 px-3 py-2 last:border-b-0">
+            <button
+              key={`${row.fid}-${row.username}-${index}`}
+              className="flex w-full items-center gap-2 border-b border-white/8 px-3 py-2 text-left transition hover:bg-white/5 last:border-b-0"
+              onClick={() => {
+                haptic("selection");
+                if (row.fid > 0) onProfile(row.fid);
+              }}
+            >
               <div className="w-5 text-xs font-black text-[#fbe764]">{index + 1}</div>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-xs font-black text-white">{row.username ? `@${row.username}` : row.displayName || "rider"}</div>
                 <div className="truncate text-[10px] font-bold text-white/45">{row.routeName}</div>
               </div>
               <div className="text-sm font-black text-white">{row.score.toLocaleString()}</div>
-            </div>
+            </button>
           ))
         )}
       </div>
@@ -1506,22 +1842,26 @@ function Leaderboard({
 function UpgradePanel({
   enabled,
   isPro,
+  weeklyActive,
   annualActive,
   onConnect,
   onEthSupport,
-  onAnnualPass,
+  onPassPurchased,
 }: {
   enabled: boolean;
   isPro: boolean;
+  weeklyActive: boolean;
   annualActive: boolean;
   onConnect: () => void;
   onEthSupport: () => void;
-  onAnnualPass: () => void;
+  onPassPurchased: (plan: "weekly" | "yearly") => void;
 }) {
   const { address } = useAccount();
+  const chainId = useChainId();
+  const { switchChain } = useSwitchChain();
   const [plan, setPlan] = useState<"weekly" | "yearly">("weekly");
   const [pendingPlan, setPendingPlan] = useState<"weekly" | "yearly" | null>(null);
-  const [step, setStep] = useState<"idle" | "approving" | "buying">("idle");
+  const [step, setStep] = useState<"idle" | "buying">("idle");
   const price = BigInt(plan === "weekly" ? WEEKLY_PRICE : YEARLY_PRICE);
   const priceLabel = plan === "weekly" ? "$1 weekly" : "$7 yearly";
 
@@ -1532,47 +1872,24 @@ function UpgradePanel({
     args: address ? [address as `0x${string}`] : undefined,
     query: { enabled: !!address },
   });
-  const { data: allowance, refetch: refetchAllowance } = useReadContract({
-    address: USDC_CONTRACT,
-    abi: USDC_ABI,
-    functionName: "allowance",
-    args: address ? [address as `0x${string}`, PRO_PASS_CONTRACT] : undefined,
-    query: { enabled: !!address },
-  });
 
-  const { writeContract: approve, data: approveHash, reset: resetApprove } = useWriteContract();
   const { writeContract: buy, data: buyHash, reset: resetBuy } = useWriteContract();
   const { sendTransaction, data: ethHash, isPending: sendingEth } = useSendTransaction();
-  const { isLoading: approving, isSuccess: approved } = useWaitForTransactionReceipt({ hash: approveHash });
   const { isLoading: buying, isSuccess: bought } = useWaitForTransactionReceipt({ hash: buyHash });
   const { isLoading: confirmingEth, isSuccess: ethConfirmed } = useWaitForTransactionReceipt({ hash: ethHash });
 
   const hasEnough = typeof balance === "bigint" && balance >= price;
-  const needsApproval = plan === "weekly" && (typeof allowance !== "bigint" || allowance < price);
-  const busy = approving || buying || sendingEth || confirmingEth || step !== "idle";
+  const busy = buying || sendingEth || confirmingEth || step !== "idle";
   const treasuryReady = !!TREASURY_ADDRESS && ETH_ADDRESS_REGEX_CLIENT.test(TREASURY_ADDRESS);
-
-  useEffect(() => {
-    if (approved && step === "approving") {
-      refetchAllowance();
-      setStep("buying");
-      setPendingPlan("weekly");
-      resetBuy();
-      buy({
-        address: PRO_PASS_CONTRACT,
-        abi: PRO_PASS_ABI,
-        functionName: "buyWeekly",
-      });
-    }
-  }, [approved, buy, refetchAllowance, resetBuy, step]);
+  const selectedPlanActive = plan === "weekly" ? weeklyActive : annualActive;
 
   useEffect(() => {
     if (bought && step === "buying") {
-      if (pendingPlan === "yearly") onAnnualPass();
+      if (pendingPlan) onPassPurchased(pendingPlan);
       setPendingPlan(null);
       setStep("idle");
     }
-  }, [bought, onAnnualPass, pendingPlan, step]);
+  }, [bought, onPassPurchased, pendingPlan, step]);
 
   useEffect(() => {
     if (ethConfirmed) onEthSupport();
@@ -1583,40 +1900,21 @@ function UpgradePanel({
       onConnect();
       return;
     }
-    if (plan === "yearly") {
-      const treasury = TREASURY_ADDRESS;
-      if (!treasuryReady || !treasury) return;
-      setStep("buying");
-      setPendingPlan("yearly");
-      resetBuy();
-      buy({
-        address: USDC_CONTRACT,
-        abi: USDC_ABI,
-        functionName: "transfer",
-        args: [treasury, BigInt(YEARLY_PRICE)],
-      });
+    if (!treasuryReady) return;
+    if (chainId !== BASE_CHAIN_ID) {
+      switchChain?.({ chainId: BASE_CHAIN_ID });
       return;
     }
-    if (needsApproval) {
-      setStep("approving");
-      setPendingPlan("weekly");
-      resetApprove();
-      approve({
-        address: USDC_CONTRACT,
-        abi: USDC_ABI,
-        functionName: "approve",
-        args: [PRO_PASS_CONTRACT, BigInt(WEEKLY_PRICE) * 12n],
-      });
-    } else {
-      setStep("buying");
-      setPendingPlan("weekly");
-      resetBuy();
-      buy({
-        address: PRO_PASS_CONTRACT,
-        abi: PRO_PASS_ABI,
-        functionName: "buyWeekly",
-      });
-    }
+    setStep("buying");
+    setPendingPlan(plan);
+    resetBuy();
+    buy({
+      address: USDC_CONTRACT,
+      abi: USDC_ABI,
+      functionName: "transfer",
+      args: [TREASURY_ADDRESS, BigInt(plan === "weekly" ? WEEKLY_PRICE : YEARLY_PRICE)],
+      chainId: BASE_CHAIN_ID,
+    });
   };
 
   const supportWithEth = () => {
@@ -1625,9 +1923,14 @@ function UpgradePanel({
       return;
     }
     if (!treasuryReady) return;
+    if (chainId !== BASE_CHAIN_ID) {
+      switchChain?.({ chainId: BASE_CHAIN_ID });
+      return;
+    }
     sendTransaction({
       to: TREASURY_ADDRESS,
-      value: parseEther("0.0003"),
+      value: parseEther(ETH_SUPPORT_AMOUNT),
+      chainId: BASE_CHAIN_ID,
     });
   };
 
@@ -1640,7 +1943,7 @@ function UpgradePanel({
             Cycle Pass
           </div>
           <div className="mt-1 text-xs font-semibold text-white/64">
-            Unlock Carbon Pro, premium score flair, and future pro routes. Weekly is contract-backed; yearly is paid in Base USDC.
+            Unlock Carbon Pro, premium score flair, and future pro routes. Payments go direct to treasury on Base.
           </div>
         </div>
         {isPro && <div className="rounded bg-[#a2ff9a] px-2 py-1 text-[10px] font-black text-[#111923]">ACTIVE</div>}
@@ -1663,16 +1966,18 @@ function UpgradePanel({
       </div>
       <button
         className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[#fbe764] px-3 text-xs font-black text-[#111923] disabled:opacity-60"
-        disabled={enabled && (!hasEnough || busy || (plan === "yearly" && !treasuryReady) || (plan === "yearly" && annualActive))}
+        disabled={enabled && (!hasEnough || busy || !treasuryReady || selectedPlanActive)}
         onClick={purchase}
       >
         <Wallet size={15} />
         {!enabled
           ? "Connect for Base USDC"
-          : annualActive && plan === "yearly"
-            ? "Year Pass Active"
-            : plan === "yearly" && !treasuryReady
+          : selectedPlanActive
+            ? plan === "weekly" ? "Weekly Active" : "Year Pass Active"
+            : !treasuryReady
               ? "Set treasury address"
+              : chainId !== BASE_CHAIN_ID
+                ? "Switch to Base"
               : busy
                 ? "Confirming"
                 : hasEnough
@@ -1685,8 +1990,11 @@ function UpgradePanel({
         onClick={supportWithEth}
       >
         <Sparkles size={15} />
-        {!enabled ? "Connect for Base ETH" : !treasuryReady ? "Set treasury address" : sendingEth || confirmingEth ? "Confirming ETH" : "Support 0.0003 ETH"}
+        {!enabled ? "Connect for Base ETH" : !treasuryReady ? "Set treasury address" : chainId !== BASE_CHAIN_ID ? "Switch to Base" : sendingEth || confirmingEth ? "Confirming ETH" : `Support ${ETH_SUPPORT_AMOUNT} ETH`}
       </button>
+      <div className="mt-2 truncate text-[10px] font-bold uppercase tracking-[0.08em] text-white/42">
+        Treasury {TREASURY_ADDRESS}
+      </div>
     </div>
   );
 }
@@ -1716,6 +2024,7 @@ function drawScene(ctx: CanvasRenderingContext2D, width: number, height: number,
   drawWorld(ctx, width, height, game, now);
   if (game.phase === "riding") drawSpeedLines(ctx, width, height, game, now);
   drawRoad(ctx, width, height, game);
+  drawRouteFx(ctx, width, height, game, now);
 
   const visible = game.entities
     .filter((entity) => !entity.collected && entity.at - game.distance > -60 && entity.at - game.distance < VIEW_DISTANCE)
@@ -1732,6 +2041,7 @@ function drawScene(ctx: CanvasRenderingContext2D, width: number, height: number,
 
   if (game.phase === "ready") drawStartText(ctx, width, height, game);
   if (game.phase === "finished") drawFinishGate(ctx, width, height, game);
+  drawVignette(ctx, width, height, game);
   ctx.restore();
 }
 
@@ -1800,7 +2110,7 @@ function drawWorld(ctx: CanvasRenderingContext2D, width: number, height: number,
 }
 
 function drawSpeedLines(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel, now: number) {
-  const intensity = 0.18 + game.boost * 0.42;
+  const intensity = 0.2 + game.boost * 0.46 + Math.min(0.18, game.combo * 0.012);
   ctx.save();
   ctx.globalAlpha = intensity;
   ctx.lineCap = "round";
@@ -1818,6 +2128,15 @@ function drawSpeedLines(ctx: CanvasRenderingContext2D, width: number, height: nu
     ctx.stroke();
   }
   ctx.restore();
+}
+
+function drawVignette(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel) {
+  const edge = ctx.createRadialGradient(width / 2, height * 0.5, width * 0.18, width / 2, height * 0.5, width * 0.82);
+  edge.addColorStop(0, "rgba(0,0,0,0)");
+  edge.addColorStop(0.72, "rgba(0,0,0,0.08)");
+  edge.addColorStop(1, `rgba(3,8,14,${0.36 + game.boost * 0.08})`);
+  ctx.fillStyle = edge;
+  ctx.fillRect(0, 0, width, height);
 }
 
 function drawRoad(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel) {
@@ -1912,6 +2231,87 @@ function drawRoad(ctx: CanvasRenderingContext2D, width: number, height: number, 
   }
 }
 
+function drawRouteFx(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel, now: number) {
+  const horizon = height * 0.25;
+  const pulse = 0.5 + Math.sin(now / 260) * 0.5;
+  const comboGlow = Math.min(1, game.combo / 12);
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+
+  for (let i = 0; i < 14; i += 1) {
+    const loop = (i * 118 - (game.distance * (0.92 + game.boost * 0.22)) % 118 + 118) % 118;
+    const p = loop / 118;
+    const left = lanePoint(width, height, -1.42, p);
+    const right = lanePoint(width, height, 1.42, p);
+    const alpha = 0.12 + p * 0.45 + game.boost * 0.18;
+
+    ctx.fillStyle = game.route.roadEdge;
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.ellipse(left.x, left.y, 2 + p * 5, 1.5 + p * 3, 0, 0, Math.PI * 2);
+    ctx.ellipse(right.x, right.y, 2 + p * 5, 1.5 + p * 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  for (let i = 0; i < 6; i += 1) {
+    const loop = (i * 210 - (game.distance * 1.08) % 210 + 210) % 210;
+    const p = loop / 210;
+    const point = lanePoint(width, height, 0, p);
+    const scale = point.scale;
+    ctx.save();
+    ctx.translate(point.x, point.y);
+    ctx.scale(scale, scale);
+    ctx.globalAlpha = 0.18 + p * 0.28 + game.boost * 0.18;
+    ctx.strokeStyle = i % 2 === 0 ? game.route.bolt : game.route.roadEdge;
+    ctx.lineWidth = 3;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(-28, 10);
+    ctx.lineTo(0, -14);
+    ctx.lineTo(28, 10);
+    ctx.moveTo(-18, 24);
+    ctx.lineTo(0, 8);
+    ctx.lineTo(18, 24);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  if (game.phase !== "finished") {
+    const signY = horizon + 18 + Math.sin(now / 520) * 3;
+    const signW = Math.min(width - 108, 238);
+    ctx.globalAlpha = 0.42 + pulse * 0.12;
+    ctx.fillStyle = "rgba(17,25,35,0.58)";
+    ctx.strokeStyle = game.route.roadEdge;
+    ctx.lineWidth = 1.2;
+    ctx.shadowColor = game.route.roadEdge;
+    ctx.shadowBlur = 12;
+    roundRect(ctx, width / 2 - signW / 2, signY - 20, signW, 38, 7);
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 0.78;
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "900 11px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(game.route.name.toUpperCase(), width / 2, signY);
+  }
+
+  if (comboGlow > 0) {
+    const y = height * 0.78;
+    const glow = ctx.createRadialGradient(width / 2, y, 8, width / 2, y, width * 0.4);
+    glow.addColorStop(0, `rgba(251,231,100,${0.1 * comboGlow})`);
+    glow.addColorStop(0.45, `rgba(124,242,255,${0.08 * comboGlow})`);
+    glow.addColorStop(1, "rgba(124,242,255,0)");
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, height * 0.48, width, height * 0.52);
+  }
+
+  ctx.restore();
+}
+
 function drawEntity(ctx: CanvasRenderingContext2D, width: number, height: number, entity: Entity, progress: number, route: RouteTheme, now: number) {
   const point = lanePoint(width, height, entity.lane, progress);
   const scale = point.scale;
@@ -2001,11 +2401,12 @@ function drawEntity(ctx: CanvasRenderingContext2D, width: number, height: number
 }
 
 function drawPlayer(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel, skin: Skin, now: number) {
-  const baseY = height - 172 - game.airborne * 42;
+  const baseY = height - 158 - game.airborne * 42;
   const horizon = height * 0.25;
   const riderProgress = clamp((baseY - horizon) / (height - 108 - horizon), 0, 1);
   const x = lanePoint(width, height, game.laneOffset, riderProgress).x;
-  const lean = (game.targetLane - game.laneOffset) * 0.22;
+  const laneLean = game.targetLane - game.laneOffset;
+  const lean = clamp(laneLean * 0.32 + game.laneOffset * 0.035, -0.32, 0.32);
   const bob = Math.sin(now / 90) * 2;
 
   ctx.save();
@@ -2014,71 +2415,115 @@ function drawPlayer(ctx: CanvasRenderingContext2D, width: number, height: number
   if (game.phase === "riding") {
     ctx.strokeStyle = skin.trail;
     ctx.globalAlpha = 0.22 + game.boost * 0.35;
-    ctx.lineWidth = 9 + game.boost * 8;
+    ctx.lineWidth = 10 + game.boost * 9;
     ctx.lineCap = "round";
     ctx.beginPath();
-    ctx.moveTo(-36, 42);
-    ctx.quadraticCurveTo(-18, 72 + game.boost * 18, -6, 110 + game.boost * 22);
-    ctx.moveTo(36, 42);
-    ctx.quadraticCurveTo(18, 72 + game.boost * 18, 6, 110 + game.boost * 22);
+    ctx.moveTo(-18, 38);
+    ctx.quadraticCurveTo(-28 - laneLean * 14, 82 + game.boost * 18, -12 - laneLean * 18, 130 + game.boost * 22);
+    ctx.moveTo(18, 38);
+    ctx.quadraticCurveTo(28 - laneLean * 14, 82 + game.boost * 18, 12 - laneLean * 18, 130 + game.boost * 22);
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
   ctx.fillStyle = "rgba(0,0,0,0.34)";
   ctx.beginPath();
-  ctx.ellipse(0, 38 + game.airborne * 42, 54, 12, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 56 + game.airborne * 42, 46, 13, 0, 0, Math.PI * 2);
   ctx.fill();
 
+  const auraPower = Math.min(1, game.boost * 0.8 + game.combo * 0.035);
+  if (auraPower > 0.02) {
+    const aura = ctx.createRadialGradient(0, 8, 12, 0, 8, 86);
+    aura.addColorStop(0, `${skin.trail}${Math.round(70 * auraPower).toString(16).padStart(2, "0")}`);
+    aura.addColorStop(0.48, `${skin.battery}${Math.round(42 * auraPower).toString(16).padStart(2, "0")}`);
+    aura.addColorStop(1, "rgba(124,242,255,0)");
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.ellipse(0, 6, 74, 98, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawPerspectiveWheel(ctx, 34, 24, 34, now / 72, skin.trail, true);
+  drawPerspectiveWheel(ctx, -38, 15, 25, now / 72, skin.trail, false);
+
   ctx.strokeStyle = "#f7fbff";
-  ctx.lineWidth = 7;
+  ctx.lineWidth = 7.5;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
   ctx.beginPath();
-  ctx.moveTo(-28, 20);
-  ctx.lineTo(-8, -22);
-  ctx.lineTo(28, 20);
-  ctx.lineTo(3, 0);
-  ctx.lineTo(-28, 20);
-  ctx.moveTo(-8, -22);
-  ctx.lineTo(3, 0);
+  ctx.moveTo(-18, 32);
+  ctx.lineTo(-10, -6);
+  ctx.lineTo(0, -38);
+  ctx.lineTo(10, -6);
+  ctx.lineTo(18, 32);
+  ctx.moveTo(-10, -6);
+  ctx.lineTo(10, -6);
+  ctx.moveTo(0, -38);
+  ctx.lineTo(0, 10);
   ctx.stroke();
 
   ctx.strokeStyle = skin.battery;
-  ctx.lineWidth = 6;
+  ctx.lineWidth = 7;
   ctx.beginPath();
-  ctx.moveTo(3, 0);
-  ctx.lineTo(22, -36);
-  ctx.lineTo(42, -32);
-  ctx.moveTo(-8, -22);
-  ctx.lineTo(-22, -42);
-  ctx.lineTo(-42, -39);
+  ctx.moveTo(-15, 12);
+  ctx.lineTo(0, -20);
+  ctx.lineTo(15, 12);
+  ctx.moveTo(-17, -38);
+  ctx.lineTo(0, -46);
+  ctx.lineTo(17, -38);
   ctx.stroke();
 
   ctx.fillStyle = skin.frame;
-  ctx.fillRect(-18, -13, 36, 18);
+  roundRect(ctx, -18, -13, 36, 22, 5);
+  ctx.fill();
   ctx.fillStyle = "#101923";
-  ctx.fillRect(-10, -8, 16, 7);
+  roundRect(ctx, -10, -8, 20, 8, 3);
+  ctx.fill();
 
-  drawWheel(ctx, -31, 22, now / 60, skin.trail);
-  drawWheel(ctx, 31, 22, now / 60, skin.trail);
+  ctx.fillStyle = "#ff4d5f";
+  ctx.shadowColor = "#ff4d5f";
+  ctx.shadowBlur = 10;
+  ctx.beginPath();
+  ctx.ellipse(0, 24, 6, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = skin.battery;
+  ctx.shadowColor = skin.battery;
+  ctx.shadowBlur = 12;
+  ctx.beginPath();
+  ctx.ellipse(0, -51, 7, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
 
   ctx.strokeStyle = "#101923";
-  ctx.lineWidth = 6;
+  ctx.lineWidth = 7;
   ctx.beginPath();
-  ctx.moveTo(-5, -47);
-  ctx.lineTo(5, -18);
-  ctx.moveTo(0, -34);
-  ctx.lineTo(20, -4);
-  ctx.moveTo(-1, -34);
-  ctx.lineTo(-19, -3);
+  ctx.moveTo(-7, -70);
+  ctx.lineTo(-4, -25);
+  ctx.moveTo(7, -70);
+  ctx.lineTo(4, -25);
+  ctx.moveTo(-2, -47);
+  ctx.lineTo(-24, -18);
+  ctx.moveTo(2, -47);
+  ctx.lineTo(24, -18);
   ctx.stroke();
+
+  ctx.fillStyle = "#132031";
+  roundRect(ctx, -18, -66, 36, 42, 12);
+  ctx.fill();
+  ctx.fillStyle = skin.trail;
+  ctx.globalAlpha = 0.85;
+  roundRect(ctx, -11, -60, 22, 26, 8);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
   ctx.fillStyle = "#f6d2a8";
   ctx.beginPath();
-  ctx.arc(-6, -60, 10, 0, Math.PI * 2);
+  ctx.arc(0, -82, 10, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = "#ff5d73";
   ctx.beginPath();
-  ctx.ellipse(-6, -70, 16, 7, -0.08, 0, Math.PI * 2);
+  ctx.ellipse(0, -92, 17, 8, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -2108,21 +2553,25 @@ function drawFeedback(ctx: CanvasRenderingContext2D, width: number, height: numb
   ctx.restore();
 }
 
-function drawWheel(ctx: CanvasRenderingContext2D, x: number, y: number, spin: number, accent: string) {
+function drawPerspectiveWheel(ctx: CanvasRenderingContext2D, y: number, radiusX: number, radiusY: number, spin: number, accent: string, rear: boolean) {
   ctx.strokeStyle = "#eef8ff";
   ctx.lineWidth = 5;
   ctx.beginPath();
-  ctx.arc(x, y, 17, 0, Math.PI * 2);
+  ctx.ellipse(0, y, radiusX, radiusY, 0, 0, Math.PI * 2);
   ctx.stroke();
   ctx.strokeStyle = accent;
-  ctx.lineWidth = 2;
+  ctx.lineWidth = rear ? 2.5 : 2;
   for (let i = 0; i < 4; i += 1) {
     const angle = spin + i * (Math.PI / 2);
     ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + Math.cos(angle) * 14, y + Math.sin(angle) * 14);
+    ctx.moveTo(0, y);
+    ctx.lineTo(Math.cos(angle) * radiusX * 0.72, y + Math.sin(angle) * radiusY * 0.72);
     ctx.stroke();
   }
+  ctx.fillStyle = rear ? "#101923" : "#172033";
+  ctx.beginPath();
+  ctx.ellipse(0, y, rear ? 5 : 4, rear ? 7 : 5, 0, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 function drawStartText(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel) {
