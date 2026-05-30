@@ -1,0 +1,30 @@
+{
+  "accountAssociation": {
+    "header": "eyJmaWQiOjEwNTkwNzUsInR5cGUiOiJhdXRoIiwia2V5IjoiMHg3NmJDNzVFZjJGMWYwRjI1ZTA3ODY0MTkxMEQ4RTIzQTQzMDIwNEY1In0",
+    "payload": "eyJkb21haW4iOiJuc2hlbGxhcHAudmVyY2VsLmFwcCJ9",
+    "signature": "HxpoEi8cYjUokhuCb0QBLlBsVp+VeSoQLQsrDsbsf2A8q7c/9CBwEXKMlCNUcOUT+zN0EjjoaJcZ4gjiwrjprhw="
+  },
+  "miniapp": {
+    "version": "1",
+    "name": "nSh3//",
+    "buttonTitle": "nSh3//",
+    "tagline": "command the graph.",
+    "subtitle": "terminal for the protocol",
+    "description": "A terminal interface for Farcaster. Type commands, pipe data, explore the social graph. Less app, more cockpit.",
+    "iconUrl": "https://nshellapp.vercel.app/media/nshell.png",
+    "homeUrl": "https://nshellapp.vercel.app/",
+    "imageUrl": "https://nshellapp.vercel.app/media/nshell.png",
+    "splashImageUrl": "https://nshellapp.vercel.app/media/nshell.png",
+    "heroImageUrl": "https://nshellapp.vercel.app/media/nshell.png",
+    "splashBackgroundColor": "#0a0a0a",
+    "requiredChains": ["eip155:8453"],
+    "primaryCategory": "utility",
+    "tags": ["terminal", "developer", "farcaster", "social", "nshell"],
+    "actions": ["viewProfile"],
+    "webhookUrl": "https://nshellapp.vercel.app/api/notify",
+    "ogTitle": "nShell - command the graph",
+    "ogDescription": "A terminal interface for Farcaster. Type commands, pipe data, explore the social graph.",
+    "ogImageUrl": "https://nshellapp.vercel.app/media/nshell.png",
+    "castShareUrl": "https://nshellapp.vercel.app/"
+  }
+}

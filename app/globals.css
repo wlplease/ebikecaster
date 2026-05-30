@@ -1,0 +1,529 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════════════
+   nSh3// Theme System
+   Dark = hacker terminal (emerald on black)
+   Light = vintage printout (dark green on warm paper)
+   ═══════════════════════════════════════════════════════ */
+
+@layer base {
+  :root {
+    /* ── Terminal theme vars (dark default) ── */
+    --t-bg: #0a0a0a;
+    --t-bg-outer: #050505;
+    --t-panel: #0b0b0b;
+    --t-card: rgba(5, 46, 22, 0.1);
+    --t-hover: rgba(5, 46, 22, 0.2);
+    --t-active: rgba(5, 46, 22, 0.3);
+    --t-overlay: rgba(0, 0, 0, 0.5);
+
+    --t-text: #34d399;
+    --t-bright: #6ee7b7;
+    --t-info: rgba(16, 185, 129, 0.9);
+    --t-dim: #10b981;
+    --t-muted: #059669;
+    --t-system: rgba(16, 185, 129, 0.7);
+    --t-ghost: rgba(52, 211, 153, 0.5);
+    --t-placeholder: rgba(52, 211, 153, 0.5);
+    --t-empty: rgba(52, 211, 153, 0.6);
+    --t-error: rgba(245, 158, 11, 0.9);
+
+    --t-border: rgba(6, 78, 59, 0.3);
+    --t-border-dim: rgba(6, 78, 59, 0.2);
+    --t-border-faint: rgba(6, 78, 59, 0.1);
+
+    --t-dot: #10b981;
+    --t-dot-dim: #059669;
+    --t-accent: rgba(16, 185, 129, 0.9);
+    --t-cell: rgba(52, 211, 153, 0.9);
+    --t-header: rgba(4, 120, 87, 0.7);
+    --t-table-footer: rgba(6, 78, 59, 0.4);
+
+    --t-glow: rgba(0, 255, 65, 0.3);
+    --t-glow-strong: rgba(0, 255, 65, 0.6);
+    --t-glow-subtle: rgba(0, 255, 65, 0.08);
+    --t-grid: rgba(0, 255, 65, 0.02);
+    --t-scanline: rgba(0, 255, 65, 0.008);
+    --t-flash: rgba(0, 255, 65, 0.12);
+    --t-selection-bg: rgba(0, 255, 65, 0.2);
+    --t-selection-text: #00ff41;
+    --t-caret: #00ff41;
+
+    /* ── Keyboard ── */
+    --t-key-bg: #0d0d0d;
+    --t-key-text: #6ee7b7;
+    --t-key-text-shadow: 0 0 8px rgba(110, 231, 183, 0.4);
+    --t-key-border: rgba(6, 78, 59, 0.3);
+    --t-key-active: #1a2e1a;
+    --t-key-special: #0a1a0a;
+    --t-key-chip-bg: rgba(5, 46, 22, 0.4);
+    --t-key-chip-text: #34d399;
+    --t-kb-bg: #060606;
+
+    /* ── Shadcn compat ── */
+    --nsh-bg: #0a0a0a;
+    --nsh-bg-secondary: #0d0d0d;
+    --nsh-bg-card: #111111;
+    --nsh-border: #1a1a1a;
+    --nsh-emerald: #00ff41;
+    --nsh-emerald-dim: #00cc33;
+    --nsh-emerald-dark: #003d10;
+    --nsh-emerald-glow: rgba(0, 255, 65, 0.15);
+    --nsh-emerald-subtle: rgba(0, 255, 65, 0.05);
+    --nsh-text: #00ff41;
+    --nsh-text-dim: rgba(0, 204, 51, 0.5);
+    --nsh-text-muted: rgba(0, 255, 65, 0.25);
+    --nsh-error: #ff6b6b;
+    --nsh-warn: #f0a500;
+    --nsh-info: #4ecdc4;
+    --nsh-cursor: #00ff41;
+
+    --background: 0 0% 4%;
+    --foreground: 142 100% 50%;
+    --card: 0 0% 7%;
+    --card-foreground: 142 100% 50%;
+    --popover: 0 0% 5%;
+    --popover-foreground: 142 100% 50%;
+    --primary: 142 100% 50%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 142 100% 40%;
+    --muted: 0 0% 10%;
+    --muted-foreground: 142 100% 25%;
+    --accent: 142 100% 50%;
+    --accent-foreground: 0 0% 0%;
+    --destructive: 0 70% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 142 100% 10%;
+    --input: 142 100% 10%;
+    --ring: 142 100% 50%;
+    --radius: 0.25rem;
+
+    /* ── Mode indicators ── */
+    --t-mode-compose: #f59e0b;
+    --t-mode-exec: #a78bfa;
+  }
+
+  /* ── Light Theme: Vintage Printout ── */
+  [data-theme="light"] {
+    --t-bg: #f4f1ea;
+    --t-bg-outer: #e8e5de;
+    --t-panel: #eae7e0;
+    --t-card: #e5e2db;
+    --t-hover: rgba(0, 50, 0, 0.05);
+    --t-active: rgba(0, 50, 0, 0.08);
+    --t-overlay: rgba(0, 0, 0, 0.25);
+
+    --t-text: #2d5a2d;
+    --t-bright: #1a3d1a;
+    --t-info: #4a7a4a;
+    --t-dim: #6a9a6a;
+    --t-muted: #8aab8a;
+    --t-system: #9ab89a;
+    --t-ghost: #b8ccb8;
+    --t-placeholder: #a0b8a0;
+    --t-empty: #c0d0c0;
+    --t-error: #c44a00;
+
+    --t-border: #c8d4c8;
+    --t-border-dim: #d8e0d8;
+    --t-border-faint: #e0e8e0;
+
+    --t-dot: #4a8a4a;
+    --t-dot-dim: #5a9a5a;
+    --t-accent: #3a7a3a;
+    --t-cell: #3a6a3a;
+    --t-header: #6a9a6a;
+    --t-table-footer: #a0b8a0;
+
+    --t-glow: transparent;
+    --t-glow-strong: transparent;
+    --t-glow-subtle: transparent;
+    --t-grid: rgba(0, 80, 0, 0.03);
+    --t-scanline: rgba(0, 80, 0, 0.008);
+    --t-flash: rgba(0, 120, 40, 0.08);
+    --t-selection-bg: rgba(0, 100, 30, 0.15);
+    --t-selection-text: #1a3d1a;
+    --t-caret: #2d5a2d;
+
+    --t-key-bg: #dedad2;
+    --t-key-text: #1a3d1a;
+    --t-key-text-shadow: none;
+    --t-key-border: #bec8be;
+    --t-key-active: #d0cdc6;
+    --t-key-special: #d5d2cb;
+    --t-key-chip-bg: rgba(0, 80, 0, 0.12);
+    --t-key-chip-text: #2d5a2d;
+    --t-kb-bg: #e8e5de;
+
+    --t-mode-compose: #d97706;
+    --t-mode-exec: #7c3aed;
+  }
+
+  /* ── Amber Theme: Retro CRT Terminal ── */
+  [data-theme="amber"] {
+    --t-bg: #0a0800;
+    --t-bg-outer: #050400;
+    --t-panel: #0c0a00;
+    --t-card: rgba(46, 30, 5, 0.15);
+    --t-hover: rgba(46, 30, 5, 0.25);
+    --t-active: rgba(46, 30, 5, 0.35);
+    --t-overlay: rgba(0, 0, 0, 0.5);
+
+    --t-text: #ffb000;
+    --t-bright: #ffd060;
+    --t-info: rgba(255, 176, 0, 0.9);
+    --t-dim: #ffb000;
+    --t-muted: #cc8c00;
+    --t-system: rgba(255, 176, 0, 0.7);
+    --t-ghost: rgba(255, 176, 0, 0.5);
+    --t-placeholder: rgba(255, 176, 0, 0.5);
+    --t-empty: rgba(255, 176, 0, 0.6);
+    --t-error: rgba(255, 80, 80, 0.9);
+
+    --t-border: rgba(120, 80, 0, 0.3);
+    --t-border-dim: rgba(120, 80, 0, 0.2);
+    --t-border-faint: rgba(120, 80, 0, 0.1);
+
+    --t-dot: #ff8c00;
+    --t-dot-dim: #cc7000;
+    --t-accent: #ff8c00;
+    --t-cell: rgba(255, 176, 0, 0.9);
+    --t-header: rgba(176, 120, 0, 0.7);
+    --t-table-footer: rgba(120, 80, 0, 0.4);
+
+    --t-glow: rgba(255, 176, 0, 0.3);
+    --t-glow-strong: rgba(255, 176, 0, 0.6);
+    --t-glow-subtle: rgba(255, 176, 0, 0.08);
+    --t-grid: rgba(255, 176, 0, 0.02);
+    --t-scanline: rgba(255, 176, 0, 0.008);
+    --t-flash: rgba(255, 176, 0, 0.12);
+    --t-selection-bg: rgba(255, 176, 0, 0.2);
+    --t-selection-text: #ffd060;
+    --t-caret: #ffb000;
+
+    --t-key-bg: #100c00;
+    --t-key-text: #ffd060;
+    --t-key-text-shadow: 0 0 8px rgba(255, 208, 96, 0.4);
+    --t-key-border: rgba(120, 80, 0, 0.35);
+    --t-key-active: #2e2200;
+    --t-key-special: #140f00;
+    --t-key-chip-bg: rgba(46, 30, 5, 0.4);
+    --t-key-chip-text: #ffb000;
+    --t-kb-bg: #080600;
+
+    --t-mode-compose: #f59e0b;
+    --t-mode-exec: #c4b5fd;
+  }
+
+  /* ── Ocean Theme: Cool Blue Terminal ── */
+  [data-theme="ocean"] {
+    --t-bg: #0a0c14;
+    --t-bg-outer: #060810;
+    --t-panel: #0c0e18;
+    --t-card: rgba(5, 20, 50, 0.2);
+    --t-hover: rgba(5, 20, 50, 0.3);
+    --t-active: rgba(5, 20, 50, 0.4);
+    --t-overlay: rgba(0, 0, 0, 0.5);
+
+    --t-text: #5ba3d9;
+    --t-bright: #8ac4ef;
+    --t-info: rgba(91, 163, 217, 0.9);
+    --t-dim: #5ba3d9;
+    --t-muted: #3b82c6;
+    --t-system: rgba(91, 163, 217, 0.7);
+    --t-ghost: rgba(91, 163, 217, 0.5);
+    --t-placeholder: rgba(91, 163, 217, 0.5);
+    --t-empty: rgba(91, 163, 217, 0.6);
+    --t-error: rgba(248, 113, 113, 0.9);
+
+    --t-border: rgba(20, 60, 100, 0.3);
+    --t-border-dim: rgba(20, 60, 100, 0.2);
+    --t-border-faint: rgba(20, 60, 100, 0.1);
+
+    --t-dot: #3b82f6;
+    --t-dot-dim: #2563eb;
+    --t-accent: #3b82f6;
+    --t-cell: rgba(91, 163, 217, 0.9);
+    --t-header: rgba(37, 99, 160, 0.7);
+    --t-table-footer: rgba(29, 78, 128, 0.4);
+
+    --t-glow: rgba(59, 130, 246, 0.3);
+    --t-glow-strong: rgba(59, 130, 246, 0.6);
+    --t-glow-subtle: rgba(59, 130, 246, 0.08);
+    --t-grid: rgba(59, 130, 246, 0.02);
+    --t-scanline: rgba(59, 130, 246, 0.008);
+    --t-flash: rgba(59, 130, 246, 0.12);
+    --t-selection-bg: rgba(59, 130, 246, 0.2);
+    --t-selection-text: #8ac4ef;
+    --t-caret: #5ba3d9;
+
+    --t-key-bg: #0a0c18;
+    --t-key-text: #8ac4ef;
+    --t-key-text-shadow: 0 0 8px rgba(138, 196, 239, 0.4);
+    --t-key-border: rgba(20, 60, 100, 0.35);
+    --t-key-active: #142040;
+    --t-key-special: #0c1020;
+    --t-key-chip-bg: rgba(5, 20, 50, 0.4);
+    --t-key-chip-text: #5ba3d9;
+    --t-kb-bg: #080a12;
+
+    --t-mode-compose: #f59e0b;
+    --t-mode-exec: #c4b5fd;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    -webkit-touch-callout: none;
+  }
+  body {
+    background: var(--t-bg);
+    color: var(--t-text);
+    font-family: "JetBrains Mono", "SF Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 300ms ease, color 300ms ease;
+  }
+}
+
+/* ── Terminal Grid Background ── */
+.terminal-grid {
+  background-image:
+    linear-gradient(var(--t-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--t-grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* ── Scrollbar ── */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Rune Flash (success) ── */
+@keyframes rune-flash {
+  0% { background: radial-gradient(circle at center, var(--t-flash) 0%, transparent 70%); }
+  50% { background: radial-gradient(circle at center, rgba(0, 255, 65, 0.06) 0%, transparent 60%); }
+  100% { background: transparent; }
+}
+.animate-rune-flash {
+  animation: rune-flash 0.6s ease-out forwards;
+}
+
+/* ── Cursor Pulse ── */
+@keyframes cursor-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+.animate-cursor-pulse {
+  animation: cursor-pulse 1.2s ease-in-out infinite;
+}
+
+/* ── Fade In ── */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+/* ── Slide In (sidebar) ── */
+@keyframes slide-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+.animate-slide-in {
+  animation: slide-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Slide Up (start menu) ── */
+@keyframes menu-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-menu-up {
+  animation: menu-up 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Blink ── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.animate-blink {
+  animation: blink 1s step-end infinite;
+}
+
+/* ── Processing Dots ── */
+@keyframes dots {
+  0% { content: '.'; }
+  33% { content: '..'; }
+  66% { content: '...'; }
+}
+
+/* ── Glow Text ── */
+.text-glow {
+  text-shadow: 0 0 8px var(--t-glow), 0 0 16px rgba(0, 255, 65, 0.1);
+}
+.text-glow-strong {
+  text-shadow: 0 0 12px var(--t-glow-strong), 0 0 24px rgba(0, 255, 65, 0.2);
+}
+
+/* ── Border Glow ── */
+.border-glow {
+  box-shadow: 0 0 10px rgba(0, 255, 65, 0.12), inset 0 0 6px rgba(0, 255, 65, 0.05);
+}
+
+/* ── Logo Glow ── */
+@keyframes logo-pulse {
+  0%, 100% { text-shadow: 0 0 8px var(--t-glow); }
+  50% { text-shadow: 0 0 16px var(--t-glow-strong), 0 0 32px rgba(0, 255, 65, 0.15); }
+}
+.animate-logo-pulse {
+  animation: logo-pulse 3s ease-in-out infinite;
+}
+
+/* ── Scanline (subtle) ── */
+.scanline::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    var(--t-scanline) 2px,
+    var(--t-scanline) 4px
+  );
+  pointer-events: none;
+}
+
+/* ── Scale Up ── */
+@keyframes scale-up {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+.animate-scale-up {
+  animation: scale-up 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Slide Up ── */
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up {
+  animation: slide-up 0.15s ease-out;
+}
+
+/* ── Key press ── */
+@keyframes key-press {
+  0% { transform: scale(1); }
+  50% { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
+.animate-key-press {
+  animation: key-press 0.1s ease-out;
+}
+
+/* ── Input caret color ── */
+input {
+  caret-color: var(--t-caret);
+}
+
+/* ── Selection ── */
+::selection {
+  background: var(--t-selection-bg);
+  color: var(--t-selection-text);
+}
+
+/* ── Desktop centering ── */
+@media (min-width: 520px) {
+  body {
+    display: flex;
+    justify-content: center;
+    background: var(--t-bg-outer);
+  }
+}
+
+/* ── Upsell Glow (pulsing border for upgrade cards) ── */
+@keyframes upsell-glow {
+  0%, 100% { box-shadow: 0 0 6px var(--t-glow-subtle), inset 0 0 6px rgba(0, 255, 65, 0.02); }
+  50% { box-shadow: 0 0 14px var(--t-glow), inset 0 0 10px rgba(0, 255, 65, 0.04); }
+}
+.upsell-glow {
+  animation: upsell-glow 2s ease-in-out infinite;
+}
+
+/* ── Pro Badge Shimmer ── */
+@keyframes pro-shimmer {
+  0% { background-position: -100% 0; }
+  100% { background-position: 200% 0; }
+}
+.pro-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--t-card) 0%,
+    var(--t-hover) 40%,
+    var(--t-active) 50%,
+    var(--t-hover) 60%,
+    var(--t-card) 100%
+  );
+  background-size: 200% 100%;
+  animation: pro-shimmer 1.5s linear infinite;
+}
+
+/* ── Share Button Pulse ── */
+@keyframes share-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03); }
+}
+.share-pulse {
+  animation: share-pulse 1.5s ease-in-out infinite;
+}
+
+/* ── Table Scroll Fade ── */
+.table-scroll-fade::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 24px;
+  background: linear-gradient(to right, transparent, var(--t-bg));
+  pointer-events: none;
+  opacity: 0.8;
+}
+
+/* ── Toast animation ── */
+@keyframes toast-in-out {
+  0% { opacity: 0; transform: translateY(8px); }
+  15% { opacity: 1; transform: translateY(0); }
+  85% { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-4px); }
+}
+.animate-toast {
+  animation: toast-in-out 1.5s ease-in-out forwards;
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
