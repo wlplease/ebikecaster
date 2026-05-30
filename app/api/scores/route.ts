@@ -14,8 +14,8 @@ const ROUTE_NAMES = ["Neon Bike Lane", "Solar Pier", "Market Loop", "Rainline Ex
 const scoreSchema = z.object({
   dateKey: z.string().regex(DATE_REGEX),
   routeName: z.string().min(1).max(64),
-  score: z.number().int().min(0).max(25000),
-  distance: z.number().int().min(0).max(10000),
+  score: z.number().int().min(0).max(100000),
+  distance: z.number().int().min(0).max(20000),
   battery: z.number().int().min(0).max(100),
   pickups: z.number().int().min(0).max(100),
   hits: z.number().int().min(0).max(100),
@@ -55,6 +55,17 @@ function utcDateKey(offsetDays = 0) {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() + offsetDays);
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+}
+
+function weekKeyFromDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const dayNumber = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNumber);
+  const weekYear = date.getUTCFullYear();
+  const yearStart = new Date(Date.UTC(weekYear, 0, 1));
+  const week = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${weekYear}-W${String(week).padStart(2, "0")}`;
 }
 
 function validDateKey(dateKey: string) {
@@ -128,6 +139,7 @@ async function followingFids(fid: number) {
 export async function GET(request: NextRequest) {
   const dateKey = request.nextUrl.searchParams.get("dateKey") || "";
   const scope = request.nextUrl.searchParams.get("scope") === "friends" ? "friends" : "global";
+  const period = request.nextUrl.searchParams.get("period") === "weekly" ? "weekly" : "daily";
   const fid = Number(request.nextUrl.searchParams.get("fid") || "0");
 
   if (!DATE_REGEX.test(dateKey)) {
@@ -136,9 +148,13 @@ export async function GET(request: NextRequest) {
 
   try {
     const db = getAdminDb();
+    const weekKey = weekKeyFromDateKey(dateKey);
+    const collection = period === "weekly" ? "castercycle-weekly-scores" : "castercycle-scores";
+    const keyField = period === "weekly" ? "weekKey" : "dateKey";
+    const keyValue = period === "weekly" ? weekKey : dateKey;
     const snap = await db
-      .collection("castercycle-scores")
-      .where("dateKey", "==", dateKey)
+      .collection(collection)
+      .where(keyField, "==", keyValue)
       .orderBy("score", "desc")
       .limit(scope === "friends" ? 100 : 25)
       .get();
@@ -151,7 +167,10 @@ export async function GET(request: NextRequest) {
         displayName: String(data.displayName || ""),
         pfpUrl: String(data.pfpUrl || ""),
         score: Number(data.score || 0),
-        routeName: String(data.routeName || ""),
+        dailyScore: period === "daily" ? Number(data.score || 0) : 0,
+        weeklyScore: period === "weekly" ? Number(data.score || 0) : 0,
+        routeName: String(data.routeName || data.bestRouteName || ""),
+        bestDateKey: String(data.bestDateKey || data.dateKey || ""),
         skin: String(data.skin || "signal"),
       };
     });
@@ -161,7 +180,18 @@ export async function GET(request: NextRequest) {
       if (fids) rows = rows.filter((row) => fids.has(row.fid)).slice(0, 25);
     }
 
-    return json({ ok: true, rows, scope, friendsResolved: scope === "friends" && !!process.env.NEYNAR_API_KEY });
+    const counterRefs = rows.map((row) =>
+      db.collection(period === "weekly" ? "castercycle-scores" : "castercycle-weekly-scores").doc(
+        period === "weekly" ? `${dateKey}:${row.fid}` : `${weekKey}:${row.fid}`,
+      ),
+    );
+    const counterDocs = await Promise.all(counterRefs.map((ref) => ref.get()));
+    rows = rows.map((row, index) => {
+      const score = Number(counterDocs[index].data()?.score || 0);
+      return period === "weekly" ? { ...row, dailyScore: score } : { ...row, weeklyScore: score };
+    });
+
+    return json({ ok: true, rows, scope, period, weekKey, friendsResolved: scope === "friends" && !!process.env.NEYNAR_API_KEY });
   } catch {
     return json({ ok: false, rows: [], configured: false });
   }
@@ -193,23 +223,49 @@ export async function POST(request: NextRequest) {
   try {
     const db = getAdminDb();
     const docId = `${payload.dateKey}:${fid}`;
+    const weekKey = weekKeyFromDateKey(payload.dateKey);
     const ref = db.collection("castercycle-scores").doc(docId);
+    const weeklyRef = db.collection("castercycle-weekly-scores").doc(`${weekKey}:${fid}`);
     await db.runTransaction(async (txn) => {
       const existing = await txn.get(ref);
+      const existingWeekly = await txn.get(weeklyRef);
       const previousScore = existing.exists ? Number(existing.data()?.score || 0) : 0;
-      if (existing.exists && previousScore > payload.score) return;
-
-      txn.set(ref, {
-        ...payload,
+      const previousWeeklyScore = existingWeekly.exists ? Number(existingWeekly.data()?.score || 0) : 0;
+      const profile = {
         fid,
+        username: payload.username,
+        displayName: payload.displayName,
+        pfpUrl: payload.pfpUrl,
         address,
         verified: !!verifiedFid,
+      };
+
+      if (!existing.exists || previousScore <= payload.score) txn.set(ref, {
+        ...payload,
+        ...profile,
         updatedAt: FieldValue.serverTimestamp(),
         createdAt: existing.exists ? existing.data()?.createdAt || FieldValue.serverTimestamp() : FieldValue.serverTimestamp(),
       }, { merge: true });
+
+      if (!existingWeekly.exists || previousWeeklyScore <= payload.score) txn.set(weeklyRef, {
+        ...profile,
+        weekKey,
+        score: payload.score,
+        bestDateKey: payload.dateKey,
+        bestRouteName: payload.routeName,
+        skin: payload.skin,
+        pickups: payload.pickups,
+        hits: payload.hits,
+        boosts: payload.boosts,
+        nearMisses: payload.nearMisses,
+        battery: payload.battery,
+        distance: payload.distance,
+        updatedAt: FieldValue.serverTimestamp(),
+        createdAt: existingWeekly.exists ? existingWeekly.data()?.createdAt || FieldValue.serverTimestamp() : FieldValue.serverTimestamp(),
+      }, { merge: true });
     });
 
-    return json({ ok: true, verified: !!verifiedFid });
+    return json({ ok: true, verified: !!verifiedFid, weekKey });
   } catch {
     return json({ ok: false, configured: false }, 202);
   }

@@ -3,7 +3,21 @@ import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
-const LINE_IDS = ["ready", "start", "boost", "mission", "finish", "claim", "legal"] as const;
+const LINE_IDS = [
+  "ready",
+  "start",
+  "boost",
+  "mission",
+  "finish",
+  "claim",
+  "legal",
+  "lowBattery",
+  "checkpoint",
+  "combo",
+  "nearMiss",
+  "hit",
+  "finalStretch",
+] as const;
 type LineId = (typeof LINE_IDS)[number];
 
 const VOICE_BY_LINE: Record<LineId, string> = {
@@ -14,6 +28,12 @@ const VOICE_BY_LINE: Record<LineId, string> = {
   finish: process.env.ELEVENLABS_VOICE_VALE || "UgBBYS2sOqTuMpoF3BR0",
   claim: process.env.ELEVENLABS_VOICE_MARA || "iEbJsqzb6jw8MYxZ2xca",
   legal: process.env.ELEVENLABS_VOICE_LEGAL || "CeNX9CMwmxDxUF5Q2Inm",
+  lowBattery: process.env.ELEVENLABS_VOICE_SYSTEM || "bHMGij7OhWM9CNyCNeSn",
+  checkpoint: process.env.ELEVENLABS_VOICE_CHATTER || "goT3UYdM9bhm0n2lmKQx",
+  combo: process.env.ELEVENLABS_VOICE_CHATTER || "goT3UYdM9bhm0n2lmKQx",
+  nearMiss: process.env.ELEVENLABS_VOICE_PRIYA || "atf1ppeJGCYFBlCLZ26e",
+  hit: process.env.ELEVENLABS_VOICE_SYSTEM || "bHMGij7OhWM9CNyCNeSn",
+  finalStretch: process.env.ELEVENLABS_VOICE_VALE || "UgBBYS2sOqTuMpoF3BR0",
 };
 
 function json(data: unknown, status = 200) {
@@ -41,6 +61,12 @@ function voiceLine(line: LineId, request: NextRequest) {
   if (line === "mission") return `${mission} cleared. Nice ride.`;
   if (line === "finish") return "Ride complete. Share the score and make the feed chase you.";
   if (line === "legal") return "Cycle Pass payments go directly to the treasury on Base. CYCLE credits are gameplay rewards, non-transferable, and have no cash value.";
+  if (line === "lowBattery") return "Low charge. Collect bolts or keep the line clean.";
+  if (line === "checkpoint") return "Halfway marker. Hold the flow and bring it home.";
+  if (line === "combo") return "Ten flow. You are locked into the lane.";
+  if (line === "nearMiss") return "Threaded traffic. Smooth hands.";
+  if (line === "hit") return "Contact. Rebuild the combo and find charge.";
+  if (line === "finalStretch") return "Final stretch. Empty the battery and bring the score home.";
   return "Credits ready. Claim your verified ride rewards on Base.";
 }
 
@@ -73,7 +99,7 @@ export async function GET(request: NextRequest) {
         voice_settings: {
           stability: 0.58,
           similarity_boost: 0.78,
-          style: line === "boost" ? 0.34 : 0.18,
+          style: line === "boost" || line === "combo" || line === "nearMiss" ? 0.34 : 0.18,
           use_speaker_boost: true,
         },
       }),
