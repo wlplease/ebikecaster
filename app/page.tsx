@@ -22,6 +22,8 @@ import {
   Target,
   Trophy,
   Users,
+  Volume2,
+  VolumeX,
   Wallet,
   Zap,
 } from "lucide-react";
@@ -41,7 +43,7 @@ import {
   useProStatus,
 } from "@/lib/pro-pass";
 
-const APP_URL = "https://castercycle.vercel.app";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://castercycle.vercel.app";
 const TREASURY_ADDRESS = process.env.NEXT_PUBLIC_TREASURY_ADDRESS as `0x${string}` | undefined;
 const ETH_ADDRESS_REGEX_CLIENT = /^0x[0-9a-f]{40}$/i;
 const COURSE_LENGTH = 4200;
@@ -54,6 +56,8 @@ type Lane = -1 | 0 | 1;
 type EntityKind = "bolt" | "cone" | "pothole" | "barrier" | "ramp" | "gate";
 type LeaderboardScope = "global" | "friends";
 type MissionKind = "combo" | "clean" | "boosts" | "battery" | "bolts";
+type SfxId = "start" | "lane" | "bolt" | "boost" | "hit" | "clear" | "finish";
+type VoiceLineId = "ready" | "start" | "boost" | "mission" | "finish" | "claim";
 
 type RouteTheme = {
   name: string;
@@ -439,6 +443,8 @@ export default function CasterCycleApp() {
   const rafRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number | null>(null);
   const lastHudRef = useRef(0);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const voiceRef = useRef<HTMLAudioElement | null>(null);
   const [hud, setHud] = useState<Hud>(() => emptyHud(gameRef.current));
   const [stats, setStats] = useState<PersistedStats>({ bestToday: 0, bestAll: 0, streak: 0, lastRideDate: null });
   const [selectedSkin, setSelectedSkin] = useState("signal");
@@ -446,6 +452,8 @@ export default function CasterCycleApp() {
   const [leaderboardScope, setLeaderboardScope] = useState<LeaderboardScope>("global");
   const [ethSupporter, setEthSupporter] = useState(false);
   const [annualUntil, setAnnualUntil] = useState(0);
+  const [audioEnabled, setAudioEnabled] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
 
@@ -478,6 +486,8 @@ export default function CasterCycleApp() {
       if (savedSkin && SKINS.some((item) => item.id === savedSkin)) setSelectedSkin(savedSkin);
       setEthSupporter(localStorage.getItem(`${STORAGE_PREFIX}:ethSupporter`) === "1");
       setAnnualUntil(Number(localStorage.getItem(`${STORAGE_PREFIX}:annualUntil`) || "0"));
+      setAudioEnabled(localStorage.getItem(`${STORAGE_PREFIX}:audio`) === "1");
+      setVoiceEnabled(localStorage.getItem(`${STORAGE_PREFIX}:voice`) === "1");
     } catch {}
   }, []);
 
@@ -505,6 +515,85 @@ export default function CasterCycleApp() {
   }, []);
 
   const syncHud = useCallback(() => setHud(emptyHud(gameRef.current)), []);
+
+  const primeAudio = useCallback(async () => {
+    if (typeof window === "undefined") return null;
+    const AudioContextCtor =
+      window.AudioContext ||
+      (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return null;
+    if (!audioCtxRef.current) audioCtxRef.current = new AudioContextCtor();
+    if (audioCtxRef.current.state === "suspended") await audioCtxRef.current.resume().catch(() => {});
+    return audioCtxRef.current;
+  }, []);
+
+  const playSfx = useCallback((id: SfxId, force = false) => {
+    if (!audioEnabled && !force) return;
+    void primeAudio().then((ctx) => {
+      if (!ctx) return;
+      const profiles: Record<SfxId, { freq: number[]; dur: number; type: OscillatorType; gain: number }> = {
+        start: { freq: [196, 392, 587], dur: 0.28, type: "triangle", gain: 0.055 },
+        lane: { freq: [310, 390], dur: 0.09, type: "sine", gain: 0.035 },
+        bolt: { freq: [640, 880], dur: 0.12, type: "triangle", gain: 0.045 },
+        boost: { freq: [220, 440, 740], dur: 0.22, type: "sawtooth", gain: 0.04 },
+        hit: { freq: [120, 74], dur: 0.18, type: "square", gain: 0.035 },
+        clear: { freq: [523, 659, 784], dur: 0.34, type: "triangle", gain: 0.05 },
+        finish: { freq: [392, 523, 659, 880], dur: 0.42, type: "triangle", gain: 0.052 },
+      };
+      const profile = profiles[id];
+      const master = ctx.createGain();
+      master.gain.setValueAtTime(profile.gain, ctx.currentTime);
+      master.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + profile.dur);
+      master.connect(ctx.destination);
+
+      profile.freq.forEach((freq, index) => {
+        const osc = ctx.createOscillator();
+        osc.type = profile.type;
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + index * 0.035);
+        osc.connect(master);
+        osc.start(ctx.currentTime + index * 0.035);
+        osc.stop(ctx.currentTime + profile.dur);
+      });
+    });
+  }, [audioEnabled, primeAudio]);
+
+  const playVoice = useCallback((line: VoiceLineId, params: Record<string, string | number> = {}) => {
+    if (!voiceEnabled) return;
+    const url = new URL("/api/ride-voice", window.location.origin);
+    url.searchParams.set("line", line);
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
+    voiceRef.current?.pause();
+    const audio = new Audio(url.toString());
+    audio.volume = 0.86;
+    voiceRef.current = audio;
+    void audio.play().catch(() => {});
+  }, [voiceEnabled]);
+
+  const toggleAudio = useCallback(() => {
+    const next = !audioEnabled;
+    setAudioEnabled(next);
+    try {
+      localStorage.setItem(`${STORAGE_PREFIX}:audio`, next ? "1" : "0");
+    } catch {}
+    if (next) {
+      void primeAudio().then(() => playSfx("start", true));
+    }
+  }, [audioEnabled, playSfx, primeAudio]);
+
+  const toggleVoice = useCallback(() => {
+    const next = !voiceEnabled;
+    setVoiceEnabled(next);
+    try {
+      localStorage.setItem(`${STORAGE_PREFIX}:voice`, next ? "1" : "0");
+    } catch {}
+    if (next) {
+      setToast("Voice on");
+      const current = gameRef.current;
+      window.setTimeout(() => playVoice("ready", { route: current.route.name }), 80);
+    } else {
+      voiceRef.current?.pause();
+    }
+  }, [playVoice, voiceEnabled]);
 
   const loadLeaderboard = useCallback(async (scope: LeaderboardScope = leaderboardScope) => {
     const current = gameRef.current;
@@ -570,7 +659,9 @@ export default function CasterCycleApp() {
     syncHud();
     submitScore(current);
     haptic(reason === "battery" ? "error" : "success");
-  }, [publishStats, submitScore, syncHud]);
+    playSfx(reason === "battery" ? "hit" : "finish");
+    playVoice("finish", { route: current.route.name });
+  }, [playSfx, playVoice, publishStats, submitScore, syncHud]);
 
   const resetRide = useCallback(() => {
     gameRef.current = makeGame();
@@ -586,12 +677,15 @@ export default function CasterCycleApp() {
       return;
     }
     if (gameRef.current.phase === "ready") {
+      void primeAudio();
       gameRef.current.phase = "riding";
       gameRef.current.score = 0;
       syncHud();
       haptic("medium");
+      playSfx("start");
+      playVoice("start", { route: gameRef.current.route.name });
     }
-  }, [resetRide, syncHud]);
+  }, [playSfx, playVoice, primeAudio, resetRide, syncHud]);
 
   const changeLane = useCallback((direction: -1 | 1) => {
     const current = gameRef.current;
@@ -602,7 +696,8 @@ export default function CasterCycleApp() {
     if (current.phase !== "riding") return;
     current.targetLane = clamp(current.targetLane + direction, -1, 1) as Lane;
     haptic("light");
-  }, [startRide]);
+    playSfx("lane");
+  }, [playSfx, startRide]);
 
   const boostOrHop = useCallback(() => {
     const current = gameRef.current;
@@ -616,8 +711,9 @@ export default function CasterCycleApp() {
       current.boost = Math.max(current.boost, 0.4);
       current.battery = clamp(current.battery - 2.2, 0, 100);
       haptic("medium");
+      playSfx("boost");
     }
-  }, [startRide]);
+  }, [playSfx, startRide]);
 
   const shareRide = useCallback(async () => {
     const current = gameRef.current;
@@ -788,6 +884,7 @@ export default function CasterCycleApp() {
               rideSignal(current, "+CHARGE", current.route.bolt);
             }
             haptic("light");
+            playSfx("bolt");
           } else if (entity.kind === "ramp" && !entity.hit && laneMatch && rel < 36) {
             entity.hit = true;
             current.boosts += 1;
@@ -798,6 +895,8 @@ export default function CasterCycleApp() {
             current.score += 360 + current.combo * 18;
             rideSignal(current, "BOOST RAMP", "#a2ff9a", 0.12);
             haptic("medium");
+            playSfx("boost");
+            if (current.boosts === 3) playVoice("boost", { route: current.route.name });
           } else if (entity.kind === "gate" && !entity.hit && laneMatch && rel < 38) {
             entity.hit = true;
             current.boosts += 1;
@@ -808,6 +907,8 @@ export default function CasterCycleApp() {
             current.score += 450 + current.combo * 28;
             rideSignal(current, "SIGNAL GATE", current.route.roadEdge, 0.1);
             haptic("medium");
+            playSfx("boost");
+            if (current.boosts === 3) playVoice("boost", { route: current.route.name });
           } else if (entity.kind !== "bolt" && entity.kind !== "ramp" && entity.kind !== "gate" && !entity.hit && rel < 22) {
             entity.hit = true;
             if (laneMatch && current.airborne <= 0.35) {
@@ -817,6 +918,7 @@ export default function CasterCycleApp() {
               current.boost = 0;
               rideSignal(current, "BATTERY HIT", current.route.hazard, 0.9);
               haptic("error");
+              playSfx("hit");
             } else if (laneMatch && current.airborne > 0.35) {
               current.nearMisses += 1;
               current.combo += 1;
@@ -824,6 +926,7 @@ export default function CasterCycleApp() {
               current.score += 170 + current.combo * 14;
               rideSignal(current, "AIR CLEAR", current.route.roadEdge, 0.08);
               haptic("light");
+              playSfx("lane");
             } else if (!laneMatch && Math.abs(entity.lane - current.laneOffset) < 1.18) {
               current.nearMisses += 1;
               current.combo += 1;
@@ -831,6 +934,7 @@ export default function CasterCycleApp() {
               current.score += 120;
               rideSignal(current, "CLOSE CALL", "#ffffff", 0.05);
               haptic("light");
+              playSfx("lane");
             }
           }
         }
@@ -840,6 +944,8 @@ export default function CasterCycleApp() {
           current.missionNotified = true;
           rideSignal(current, "MISSION CLEAR", current.route.bolt, 0.18);
           haptic("success");
+          playSfx("clear");
+          playVoice("mission", { mission: current.mission.title });
         }
 
         current.score = Math.max(
@@ -863,7 +969,7 @@ export default function CasterCycleApp() {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [finishRide, skin, syncHud]);
+  }, [finishRide, playSfx, playVoice, skin, syncHud]);
 
   const resultLabel = useMemo(() => {
     if (hud.phase !== "finished") return "daily ride";
@@ -903,7 +1009,7 @@ export default function CasterCycleApp() {
             </div>
             <div className="truncate text-[10px] font-semibold text-white/72">{game.route.name} - {game.route.tagline}</div>
           </div>
-          <div className="flex items-center gap-2 text-[11px] font-bold">
+          <div className="flex items-center gap-1.5 text-[11px] font-bold">
             <span className="flex items-center gap-1 rounded bg-white/10 px-2 py-1">
               <Trophy size={13} />
               {hud.score.toLocaleString()}
@@ -912,6 +1018,20 @@ export default function CasterCycleApp() {
               <BatteryCharging size={13} />
               {Math.round(hud.battery)}%
             </span>
+            <button
+              aria-label={audioEnabled ? "Turn sound effects off" : "Turn sound effects on"}
+              className={`pointer-events-auto inline-flex h-7 w-7 items-center justify-center rounded border ${audioEnabled ? "border-[#fbe764]/60 bg-[#fbe764]/18 text-[#fbe764]" : "border-white/12 bg-white/8 text-white/55"}`}
+              onClick={toggleAudio}
+            >
+              {audioEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
+            </button>
+            <button
+              aria-label={voiceEnabled ? "Turn route voice off" : "Turn route voice on"}
+              className={`pointer-events-auto inline-flex h-7 w-7 items-center justify-center rounded border ${voiceEnabled ? "border-[#7cf2ff]/60 bg-[#7cf2ff]/18 text-[#7cf2ff]" : "border-white/12 bg-white/8 text-white/55"}`}
+              onClick={toggleVoice}
+            >
+              <Radio size={14} />
+            </button>
           </div>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/25">
@@ -927,8 +1047,31 @@ export default function CasterCycleApp() {
             <Metric icon={<Flame size={14} />} label="combo" value={`${hud.combo}x`} />
             <Metric icon={<Bike size={14} />} label="lane" value={game.targetLane === -1 ? "left" : game.targetLane === 1 ? "right" : "mid"} />
           </div>
-          <div className="mt-2 rounded-full border border-white/20 bg-black/30 px-4 py-2 text-center text-[11px] font-bold uppercase tracking-[0.14em] text-white/78 backdrop-blur-md">
-            tap left or right to switch lanes - tap center to hop
+          <div className="pointer-events-auto mt-2 grid grid-cols-3 gap-2">
+            <button
+              aria-label="Move left"
+              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-md border border-white/18 bg-black/32 text-xs font-black uppercase tracking-[0.08em] text-white/80 backdrop-blur-md active:scale-[0.98]"
+              onClick={() => changeLane(-1)}
+            >
+              <ChevronLeft size={18} />
+              Left
+            </button>
+            <button
+              aria-label="Hop"
+              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-md border border-[#fbe764]/50 bg-[#fbe764]/18 text-xs font-black uppercase tracking-[0.08em] text-[#fbe764] backdrop-blur-md active:scale-[0.98]"
+              onClick={boostOrHop}
+            >
+              <Zap size={16} />
+              Hop
+            </button>
+            <button
+              aria-label="Move right"
+              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-md border border-white/18 bg-black/32 text-xs font-black uppercase tracking-[0.08em] text-white/80 backdrop-blur-md active:scale-[0.98]"
+              onClick={() => changeLane(1)}
+            >
+              Right
+              <ChevronRight size={18} />
+            </button>
           </div>
         </div>
       )}
@@ -1238,7 +1381,7 @@ function CreditsPanel({
           onClick={() => requestClaim("ride")}
         >
           <Trophy size={14} />
-          {requesting === "ride" || confirming ? "Claiming" : "Ride Claim"}
+          {requesting === "ride" || confirming ? "Claiming" : "Ride"}
         </button>
         <button
           className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/15 px-3 text-xs font-black text-white disabled:opacity-55"
@@ -1246,7 +1389,7 @@ function CreditsPanel({
           onClick={() => requestClaim("share")}
         >
           <Share2 size={14} />
-          {requesting === "share" ? "Preparing" : "Share Bonus"}
+          {requesting === "share" ? "Preparing" : "Share"}
         </button>
       </div>
       <div className="mt-2 min-h-4 text-[10px] font-bold uppercase tracking-[0.08em] text-white/50">

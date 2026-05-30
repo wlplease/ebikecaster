@@ -3,29 +3,20 @@ import "./globals.css";
 import { FarcasterGate } from "@/components/farcaster-gate";
 import { Providers } from "@/components/providers";
 import { Analytics } from "@vercel/analytics/next";
+import { APP_URL, appUrl, getAccountAssociation } from "@/lib/farcaster-config";
 
-const appDomain = process.env.NEXT_PUBLIC_APP_URL || "https://castercycle.vercel.app";
-
-const accountAssociation = {
-  header:
-    process.env.FARCASTER_ACCOUNT_ASSOCIATION_HEADER ||
-    "eyJmaWQiOjEwNTkwNzUsInR5cGUiOiJhdXRoIiwia2V5IjoiMHg3NmJDNzVFZjJGMWYwRjI1ZTA3ODY0MTkxMEQ4RTIzQTQzMDIwNEY1In0",
-  payload:
-    process.env.FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD ||
-    "eyJkb21haW4iOiJjYXN0ZXJjeWNsZS52ZXJjZWwuYXBwIn0=",
-  signature: process.env.FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE || "",
-};
+const accountAssociation = getAccountAssociation();
 
 const miniAppEmbed = {
   version: "1",
-  imageUrl: `${appDomain}/media/castercycle-card.png`,
+  imageUrl: appUrl("/media/castercycle-card.png"),
   button: {
     title: "Ride CasterCycle",
     action: {
       type: "launch_miniapp" as const,
       name: "CasterCycle",
-      url: appDomain,
-      splashImageUrl: `${appDomain}/media/castercycle.png`,
+      url: appUrl("/"),
+      splashImageUrl: appUrl("/media/castercycle.png"),
       splashBackgroundColor: "#101b26",
     },
   },
@@ -33,9 +24,7 @@ const miniAppEmbed = {
 
 const miniAppMetadata = {
   "fc:miniapp": JSON.stringify(miniAppEmbed),
-  ...(accountAssociation.signature
-    ? { "fc:miniapp:account_association": JSON.stringify(accountAssociation) }
-    : {}),
+  ...(accountAssociation ? { "fc:miniapp:account_association": JSON.stringify(accountAssociation) } : {}),
 };
 
 export const metadata: Metadata = {
@@ -52,8 +41,8 @@ export const metadata: Metadata = {
     title: "CasterCycle",
     description:
       "One daily e-bike route. Grab charge, clear hazards, and share the score to beat.",
-    url: appDomain,
-    images: [{ url: `${appDomain}/media/castercycle-hero.png`, width: 1200, height: 630 }],
+    url: APP_URL,
+    images: [{ url: appUrl("/media/castercycle-hero.png"), width: 1200, height: 630 }],
   },
   other: miniAppMetadata,
 };

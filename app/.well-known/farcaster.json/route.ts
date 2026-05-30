@@ -1,29 +1,10 @@
 import { NextResponse } from "next/server";
-
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://castercycle.vercel.app";
-const ASSOCIATION_HEADER =
-  process.env.FARCASTER_ACCOUNT_ASSOCIATION_HEADER ||
-  "eyJmaWQiOjEwNTkwNzUsInR5cGUiOiJhdXRoIiwia2V5IjoiMHg3NmJDNzVFZjJGMWYwRjI1ZTA3ODY0MTkxMEQ4RTIzQTQzMDIwNEY1In0";
-const ASSOCIATION_PAYLOAD =
-  process.env.FARCASTER_ACCOUNT_ASSOCIATION_PAYLOAD ||
-  "eyJkb21haW4iOiJjYXN0ZXJjeWNsZS52ZXJjZWwuYXBwIn0=";
-const ASSOCIATION_SIGNATURE = process.env.FARCASTER_ACCOUNT_ASSOCIATION_SIGNATURE || "";
-
-function appUrl(path = "/") {
-  return new URL(path, APP_URL).toString();
-}
+import { appUrl, getAccountAssociation } from "@/lib/farcaster-config";
 
 export function GET() {
+  const accountAssociation = getAccountAssociation();
   const body = {
-    ...(ASSOCIATION_SIGNATURE
-      ? {
-          accountAssociation: {
-            header: ASSOCIATION_HEADER,
-            payload: ASSOCIATION_PAYLOAD,
-            signature: ASSOCIATION_SIGNATURE,
-          },
-        }
-      : {}),
+    ...(accountAssociation ? { accountAssociation } : {}),
     miniapp: {
       version: "1",
       name: "CasterCycle",
