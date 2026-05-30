@@ -20,7 +20,7 @@ const accountAssociation = {
 
 const miniAppEmbed = {
   version: "1",
-  imageUrl: `${appDomain}/media/castercycle.png`,
+  imageUrl: `${appDomain}/media/castercycle-card.png`,
   button: {
     title: "Ride CasterCycle",
     action: {
@@ -48,7 +48,7 @@ export const metadata: Metadata = {
     description:
       "One daily e-bike route. Grab charge, clear hazards, and share the score to beat.",
     url: appDomain,
-    images: [{ url: `${appDomain}/media/castercycle.png` }],
+    images: [{ url: `${appDomain}/media/castercycle-hero.png`, width: 1200, height: 630 }],
   },
   other: {
     "fc:miniapp": JSON.stringify(miniAppEmbed),
