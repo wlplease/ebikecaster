@@ -1,20 +1,25 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import {
   BatteryCharging,
   Bike,
   ChevronLeft,
   ChevronRight,
   Crown,
+  Flame,
   Gauge,
   Lock,
+  Map,
   Play,
+  Radio,
   RotateCcw,
   Share2,
   ShieldCheck,
   Sparkles,
   Trophy,
+  Users,
   Wallet,
   Zap,
 } from "lucide-react";
@@ -33,12 +38,12 @@ import {
   useProStatus,
 } from "@/lib/pro-pass";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://nshellapp.vercel.app";
+const APP_URL = "https://ebikecaster.vercel.app";
 const TREASURY_ADDRESS = process.env.NEXT_PUBLIC_TREASURY_ADDRESS as `0x${string}` | undefined;
 const ETH_ADDRESS_REGEX_CLIENT = /^0x[0-9a-f]{40}$/i;
 const COURSE_LENGTH = 4200;
 const VIEW_DISTANCE = 1180;
-const STORAGE_PREFIX = "voltlane";
+const STORAGE_PREFIX = "castercycle";
 
 type RidePhase = "ready" | "riding" | "finished";
 type Lane = -1 | 0 | 1;
@@ -187,11 +192,11 @@ const ROUTES: RouteTheme[] = [
 ];
 
 const SKINS: Skin[] = [
-  { id: "volt", name: "Volt Yellow", frame: "#fbe764", battery: "#7cf2ff", trail: "#fbe764", unlock: "base", label: "starter" },
+  { id: "signal", name: "Signal Yellow", frame: "#fbe764", battery: "#7cf2ff", trail: "#fbe764", unlock: "base", label: "starter" },
   { id: "mint", name: "Courier Mint", frame: "#7cf2ff", battery: "#a2ff9a", trail: "#a2ff9a", unlock: "streak", label: "3 day streak" },
   { id: "sunset", name: "Sunset Dash", frame: "#ff6d4a", battery: "#ffe45e", trail: "#ffb703", unlock: "score", label: "5k score" },
   { id: "spark", name: "Base Spark", frame: "#0052ff", battery: "#fbe764", trail: "#7cf2ff", unlock: "supporter", label: "ETH support" },
-  { id: "carbon", name: "Carbon Pro", frame: "#f7fbff", battery: "#c4b5fd", trail: "#c4b5fd", unlock: "pro", label: "Volt Pass" },
+  { id: "carbon", name: "Carbon Pro", frame: "#f7fbff", battery: "#c4b5fd", trail: "#c4b5fd", unlock: "pro", label: "Cycle Pass" },
 ];
 
 function localDateKey(date = new Date()) {
@@ -312,6 +317,14 @@ function finalScore(game: GameModel) {
   );
 }
 
+function skinShortName(name: string) {
+  return name
+    .replace(" Yellow", "")
+    .replace(" Dash", "")
+    .replace(" Spark", "")
+    .replace(" Pro", "");
+}
+
 function haptic(kind: "light" | "medium" | "success" | "error") {
   try {
     if (kind === "success") sdk.haptics.notificationOccurred("success");
@@ -320,7 +333,7 @@ function haptic(kind: "light" | "medium" | "success" | "error") {
   } catch {}
 }
 
-export default function VoltLaneApp() {
+export default function CasterCycleApp() {
   const { user, safeAreaInsets, isStandalone } = useFarcasterUser();
   const { address, isConnected } = useAccount();
   const { connectors, connect, isPending: connecting } = useConnect();
@@ -333,7 +346,7 @@ export default function VoltLaneApp() {
   const lastHudRef = useRef(0);
   const [hud, setHud] = useState<Hud>(() => emptyHud(gameRef.current));
   const [stats, setStats] = useState<PersistedStats>({ bestToday: 0, bestAll: 0, streak: 0, lastRideDate: null });
-  const [selectedSkin, setSelectedSkin] = useState("volt");
+  const [selectedSkin, setSelectedSkin] = useState("signal");
   const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
   const [leaderboardScope, setLeaderboardScope] = useState<LeaderboardScope>("global");
   const [ethSupporter, setEthSupporter] = useState(false);
@@ -363,7 +376,7 @@ export default function VoltLaneApp() {
         lastRideDate: localStorage.getItem(`${STORAGE_PREFIX}:lastRide`),
       });
       const savedSkin = localStorage.getItem(`${STORAGE_PREFIX}:skin`);
-      if (savedSkin) setSelectedSkin(savedSkin);
+      if (savedSkin && SKINS.some((item) => item.id === savedSkin)) setSelectedSkin(savedSkin);
       setEthSupporter(localStorage.getItem(`${STORAGE_PREFIX}:ethSupporter`) === "1");
     } catch {}
   }, []);
@@ -509,7 +522,7 @@ export default function VoltLaneApp() {
   const shareRide = useCallback(async () => {
     const current = gameRef.current;
     const shareUrl = `${APP_URL}/api/share-image?score=${current.score}&route=${encodeURIComponent(current.route.name)}&user=${encodeURIComponent(displayName)}&skin=${encodeURIComponent(skin.name)}&date=${current.dateKey}`;
-    const castText = `I scored ${current.score.toLocaleString()} on today's ${current.route.name} in VoltLane.\n\n${current.pickups} charge bolts, ${current.boosts} boosts, ${Math.round(current.battery)}% battery left. Beat my ride:\n${APP_URL}`;
+    const castText = `I scored ${current.score.toLocaleString()} on today's ${current.route.name} in CasterCycle.\n\n${current.pickups} charge bolts, ${current.boosts} boosts, ${Math.round(current.battery)}% battery left. Beat my ride:\n${APP_URL}`;
     setSharing(true);
     try {
       await sdk.actions.composeCast({ text: castText, embeds: [shareUrl] });
@@ -716,7 +729,7 @@ export default function VoltLaneApp() {
     >
       <canvas
         ref={canvasRef}
-        aria-label="VoltLane forward scrolling e-bike game"
+        aria-label="CasterCycle forward-scrolling e-bike game"
         className="absolute inset-0 h-full w-full touch-none"
         onPointerDown={(event) => {
           const rect = event.currentTarget.getBoundingClientRect();
@@ -726,12 +739,16 @@ export default function VoltLaneApp() {
           else boostOrHop();
         }}
       />
+      <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(7,17,27,0.08),transparent_24%,transparent_70%,rgba(7,17,27,0.48))]" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 px-3 pt-3">
-        <div className="flex items-center justify-between gap-2 rounded-md border border-white/15 bg-black/24 px-3 py-2 backdrop-blur-md">
+        <div className="flex items-center justify-between gap-2 rounded-md border border-white/15 bg-black/28 px-3 py-2 shadow-xl backdrop-blur-md">
           <div className="min-w-0">
-            <div className="text-[11px] font-black uppercase tracking-[0.18em] text-[#fbe764]">VoltLane</div>
-            <div className="truncate text-[10px] font-semibold text-white/72">{game.route.name}</div>
+            <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.16em] text-[#fbe764]">
+              <Image src="/media/castercycle.png" alt="" width={20} height={20} className="rounded object-cover" />
+              CasterCycle
+            </div>
+            <div className="truncate text-[10px] font-semibold text-white/72">{game.route.name} - {game.route.tagline}</div>
           </div>
           <div className="flex items-center gap-2 text-[11px] font-bold">
             <span className="flex items-center gap-1 rounded bg-white/10 px-2 py-1">
@@ -765,27 +782,48 @@ export default function VoltLaneApp() {
 
       {hud.phase !== "riding" && (
         <section className="pointer-events-auto absolute inset-x-0 bottom-0 z-20 px-3 pb-3">
-          <div className="rounded-md border border-white/15 bg-[#111923]/90 p-4 shadow-2xl backdrop-blur-xl">
+          <div className="no-scrollbar max-h-[88dvh] overflow-y-auto overscroll-contain rounded-md border border-white/15 bg-[#111923]/92 p-4 shadow-2xl backdrop-blur-xl">
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[#7cf2ff]">{resultLabel}</div>
-                <h1 className="mt-1 text-3xl font-black leading-none tracking-normal text-white">VoltLane</h1>
+                <h1 className="mt-1 text-3xl font-black leading-none tracking-normal text-white">CasterCycle</h1>
                 <p className="mt-2 max-w-[22rem] text-sm font-medium leading-5 text-white/76">
                   {hud.phase === "finished"
                     ? `${displayName} scored ${hud.score.toLocaleString()} on ${game.route.name}.`
-                    : `Modern Paperboy energy for e-bikes: dodge cones, catch charge, hit boost ramps, and post the daily score your Farcaster friends have to beat.`}
+                    : `A daily Farcaster e-bike sprint: dodge street clutter, chain boost ramps, collect charge, and cast the score your friends have to beat.`}
                 </p>
               </div>
-              <div className="shrink-0 rounded bg-[#fbe764] px-2 py-1 text-right text-[#111923]">
-                <div className="text-[10px] font-black uppercase leading-none">streak</div>
-                <div className="text-xl font-black leading-none">{stats.streak}</div>
+              <div className="shrink-0">
+                <Image
+                  src="/media/castercycle.png"
+                  alt=""
+                  width={64}
+                  height={64}
+                  className="h-16 w-16 rounded-md border border-white/15 object-cover shadow-lg"
+                />
+                <div className="-mt-3 ml-auto w-fit rounded bg-[#fbe764] px-2 py-1 text-right text-[#111923] shadow-lg">
+                  <div className="text-[9px] font-black uppercase leading-none">streak</div>
+                  <div className="text-lg font-black leading-none">{stats.streak}</div>
+                </div>
               </div>
+            </div>
+
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <SignalChip icon={<Map size={13} />} label="route" value={game.route.name} />
+              <SignalChip icon={<Users size={13} />} label="rider" value={displayName} />
+              <SignalChip icon={<Radio size={13} />} label="daily" value={game.dateKey.slice(5)} />
             </div>
 
             <div className="mt-4 grid grid-cols-3 gap-2">
               <ResultStat label="today" value={Math.max(stats.bestToday, hud.score).toLocaleString()} />
               <ResultStat label="best" value={Math.max(stats.bestAll, hud.score).toLocaleString()} />
-              <ResultStat label="skin" value={skin.name} />
+              <ResultStat label="skin" value={skinShortName(skin.name)} />
+            </div>
+
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <FeatureChip icon={<Flame size={13} />} label="streaks" />
+              <FeatureChip icon={<Trophy size={13} />} label="friends" />
+              <FeatureChip icon={<Wallet size={13} />} label="base" />
             </div>
 
             <div className="mt-4 grid grid-cols-2 gap-2">
@@ -817,7 +855,7 @@ export default function VoltLaneApp() {
               </button>
               <div className="flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/15 bg-white/8 px-3 text-xs font-black text-white">
                 <ShieldCheck size={15} />
-                {proLoading ? "Checking" : isPro ? formatProExpiry(expiresAt) : "Volt Pass"}
+                {proLoading ? "Checking" : isPro ? formatProExpiry(expiresAt) : "Cycle Pass"}
               </div>
             </div>
 
@@ -866,6 +904,24 @@ function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; 
   );
 }
 
+function SignalChip({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="min-h-14 rounded-md border border-white/12 bg-white/8 px-2 py-2">
+      <div className="flex items-center gap-1 text-[#7cf2ff]">{icon}<span className="text-[9px] font-black uppercase tracking-[0.12em] text-white/45">{label}</span></div>
+      <div className="mt-1 truncate text-[11px] font-black leading-tight text-white">{value}</div>
+    </div>
+  );
+}
+
+function FeatureChip({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div className="flex min-h-9 items-center justify-center gap-1.5 rounded-md border border-white/10 bg-black/18 px-2 text-[10px] font-black uppercase tracking-[0.08em] text-white/72">
+      <span className="text-[#fbe764]">{icon}</span>
+      {label}
+    </div>
+  );
+}
+
 function ResultStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md bg-white/9 px-2 py-2">
@@ -903,14 +959,16 @@ function SkinPicker({
                 borderColor: selected === skin.id ? skin.trail : "rgba(255,255,255,0.14)",
                 background: selected === skin.id ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.07)",
               }}
+              aria-label={`${skin.name}: ${skin.label}`}
+              title={`${skin.name}: ${skin.label}`}
               onClick={() => unlocked && onSelect(skin.id)}
             >
               <span className="mb-1 flex items-center justify-between">
                 <span className="h-3 w-3 rounded-full" style={{ background: skin.frame }} />
                 {!unlocked && <Lock size={12} className="text-white/55" />}
               </span>
-              <span className="block truncate text-[10px] font-black text-white">{skin.name}</span>
-              <span className="block truncate text-[9px] font-bold text-white/45">{skin.label}</span>
+              <span className="block text-[10px] font-black leading-tight text-white">{skinShortName(skin.name)}</span>
+              <span className="block text-[9px] font-bold leading-tight text-white/45">{skin.label.replace(" day streak", "d").replace(" score", "")}</span>
             </button>
           );
         })}
@@ -1076,7 +1134,7 @@ function UpgradePanel({
         <div>
           <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#fbe764]">
             <Crown size={13} />
-            Volt Pass
+            Cycle Pass
           </div>
           <div className="mt-1 text-xs font-semibold text-white/64">
             Unlock Carbon Pro skin, premium score flair, and future pro routes. Digital access only.
@@ -1157,6 +1215,13 @@ function drawScene(ctx: CanvasRenderingContext2D, width: number, height: number,
 
 function drawWorld(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel, now: number) {
   const horizon = height * 0.25;
+  ctx.fillStyle = "rgba(255,255,255,0.45)";
+  for (let i = 0; i < 28; i += 1) {
+    const x = ((i * 71 + game.seed) % Math.max(1, width));
+    const y = ((i * 29 + game.seed * 0.01 + now * 0.006) % Math.max(1, horizon));
+    ctx.fillRect(x, y, 1.2, 1.2);
+  }
+
   const sunX = width * 0.72;
   const sunY = height * 0.16;
   const glow = ctx.createRadialGradient(sunX, sunY, 5, sunX, sunY, 120);
@@ -1183,12 +1248,43 @@ function drawWorld(ctx: CanvasRenderingContext2D, width: number, height: number,
       if ((i + Math.round(now / 1000)) % 2 === 0) ctx.fillRect(x - w * 0.18, y - h * 0.72, w * 0.24, h * 0.08);
     }
   }
+
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 5; i += 1) {
+      const loop = (i * 230 - (game.distance * 0.72) % 230 + 230) % 230;
+      const progress = loop / 230;
+      const y = horizon + progress * (height - horizon);
+      const scale = 0.35 + progress * 0.9;
+      const x = width / 2 + side * (width * 0.28 + progress * width * 0.34);
+      const panelW = 44 * scale;
+      const panelH = 30 * scale;
+      ctx.save();
+      ctx.translate(x, y - 70 * scale);
+      ctx.rotate(side * -0.12);
+      ctx.fillStyle = "rgba(17,25,35,0.74)";
+      ctx.strokeStyle = i % 2 === 0 ? "rgba(124,242,255,0.7)" : "rgba(251,231,100,0.65)";
+      ctx.lineWidth = Math.max(1, 2 * scale);
+      roundRect(ctx, -panelW / 2, -panelH / 2, panelW, panelH, 5 * scale);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = i % 2 === 0 ? "#7cf2ff" : "#fbe764";
+      ctx.font = `${Math.max(8, 12 * scale)}px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(i % 2 === 0 ? "FC" : "CC", 0, 0);
+      ctx.restore();
+    }
+  }
 }
 
 function drawRoad(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel) {
   const horizon = height * 0.25;
   const bottom = height - 76;
-  ctx.fillStyle = game.route.road;
+  const road = ctx.createLinearGradient(0, horizon, 0, bottom);
+  road.addColorStop(0, game.route.road);
+  road.addColorStop(0.72, "#1f3147");
+  road.addColorStop(1, "#101923");
+  ctx.fillStyle = road;
   ctx.beginPath();
   ctx.moveTo(width * 0.44, horizon);
   ctx.lineTo(width * 0.56, horizon);
@@ -1197,14 +1293,30 @@ function drawRoad(ctx: CanvasRenderingContext2D, width: number, height: number, 
   ctx.closePath();
   ctx.fill();
 
+  ctx.strokeStyle = "rgba(255,255,255,0.08)";
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 12; i += 1) {
+    const loop = (i * 88 - (game.distance * 0.9) % 88 + 88) % 88;
+    const p = loop / 88;
+    const left = lanePoint(width, height, -1.28, p);
+    const right = lanePoint(width, height, 1.28, p);
+    ctx.beginPath();
+    ctx.moveTo(left.x, left.y);
+    ctx.lineTo(right.x, right.y);
+    ctx.stroke();
+  }
+
   ctx.strokeStyle = game.route.roadEdge;
   ctx.lineWidth = 4;
+  ctx.shadowColor = game.route.roadEdge;
+  ctx.shadowBlur = 10;
   ctx.beginPath();
   ctx.moveTo(width * 0.44, horizon);
   ctx.lineTo(width * 0.04, bottom);
   ctx.moveTo(width * 0.56, horizon);
   ctx.lineTo(width * 0.96, bottom);
   ctx.stroke();
+  ctx.shadowBlur = 0;
 
   ctx.strokeStyle = "rgba(255,255,255,0.36)";
   ctx.lineWidth = 2;
@@ -1229,6 +1341,11 @@ function drawEntity(ctx: CanvasRenderingContext2D, width: number, height: number
   ctx.save();
   ctx.translate(point.x, point.y);
   ctx.scale(scale, scale);
+
+  ctx.fillStyle = "rgba(0,0,0,0.24)";
+  ctx.beginPath();
+  ctx.ellipse(0, 24, 28, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
 
   if (entity.kind === "bolt") {
     ctx.rotate(now / 420 + entity.id);
@@ -1294,6 +1411,19 @@ function drawPlayer(ctx: CanvasRenderingContext2D, width: number, height: number
   ctx.save();
   ctx.translate(x, baseY + bob);
   ctx.rotate(lean);
+  if (game.phase === "riding") {
+    ctx.strokeStyle = skin.trail;
+    ctx.globalAlpha = 0.22 + game.boost * 0.35;
+    ctx.lineWidth = 9 + game.boost * 8;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-36, 42);
+    ctx.quadraticCurveTo(-18, 72 + game.boost * 18, -6, 110 + game.boost * 22);
+    ctx.moveTo(36, 42);
+    ctx.quadraticCurveTo(18, 72 + game.boost * 18, 6, 110 + game.boost * 22);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
   ctx.fillStyle = "rgba(0,0,0,0.34)";
   ctx.beginPath();
   ctx.ellipse(0, 38 + game.airborne * 42, 54, 12, 0, 0, Math.PI * 2);
@@ -1399,4 +1529,19 @@ function drawFinishGate(ctx: CanvasRenderingContext2D, width: number, height: nu
   ctx.font = "900 14px system-ui, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText(game.score.toLocaleString(), width / 2, left.y - 76);
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
 }

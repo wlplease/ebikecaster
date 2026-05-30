@@ -130,7 +130,7 @@ export async function GET(request: NextRequest) {
   try {
     const db = getAdminDb();
     const snap = await db
-      .collection("voltlane-scores")
+      .collection("castercycle-scores")
       .where("dateKey", "==", dateKey)
       .orderBy("score", "desc")
       .limit(scope === "friends" ? 100 : 25)
@@ -145,7 +145,7 @@ export async function GET(request: NextRequest) {
         pfpUrl: String(data.pfpUrl || ""),
         score: Number(data.score || 0),
         routeName: String(data.routeName || ""),
-        skin: String(data.skin || "volt"),
+        skin: String(data.skin || "signal"),
       };
     });
 
@@ -162,7 +162,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   const ip = requestIp(request);
-  const { allowed } = rateLimit(`voltlane-score:${ip}`, 20, 60_000);
+  const { allowed } = rateLimit(`castercycle-score:${ip}`, 20, 60_000);
   if (!allowed) return json({ error: "Too many score submissions." }, 429);
 
   const parsed = scoreSchema.safeParse(await request.json().catch(() => null));
@@ -186,7 +186,7 @@ export async function POST(request: NextRequest) {
   try {
     const db = getAdminDb();
     const docId = `${payload.dateKey}:${fid}`;
-    const ref = db.collection("voltlane-scores").doc(docId);
+    const ref = db.collection("castercycle-scores").doc(docId);
     await db.runTransaction(async (txn) => {
       const existing = await txn.get(ref);
       const previousScore = existing.exists ? Number(existing.data()?.score || 0) : 0;

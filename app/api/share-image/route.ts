@@ -9,8 +9,8 @@ function clean(value: string | null, fallback: string, max = 80) {
 export async function GET(request: NextRequest) {
   const score = clean(request.nextUrl.searchParams.get("score"), "0", 16);
   const route = clean(request.nextUrl.searchParams.get("route"), "Daily Route");
-  const user = clean(request.nextUrl.searchParams.get("user"), "VoltLane rider");
-  const skin = clean(request.nextUrl.searchParams.get("skin"), "Volt Yellow");
+  const user = clean(request.nextUrl.searchParams.get("user"), "CasterCycle rider");
+  const skin = clean(request.nextUrl.searchParams.get("skin"), "Signal Yellow");
   const date = clean(request.nextUrl.searchParams.get("date"), "");
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
   <path d="M590 292 L625 390 M605 332 L665 410 M603 332 L548 410" stroke="#101923" stroke-width="18" stroke-linecap="round"/>
   <circle cx="585" cy="250" r="27" fill="#f6d2a8"/>
   <ellipse cx="585" cy="226" rx="44" ry="18" fill="#ff5d73"/>
-  <text x="70" y="115" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="900" fill="#fbe764" letter-spacing="8">VOLTLANE</text>
+  <text x="70" y="115" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="900" fill="#fbe764" letter-spacing="8">CASTERCYCLE</text>
   <text x="70" y="172" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="800" fill="white" opacity="0.82">${route}</text>
   <text x="70" y="328" font-family="Arial, Helvetica, sans-serif" font-size="118" font-weight="900" fill="white">${score}</text>
   <text x="76" y="374" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="800" fill="#fbe764">DAILY RIDE SCORE</text>

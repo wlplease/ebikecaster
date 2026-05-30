@@ -35,7 +35,7 @@ export default function BlockedPage() {
             color: "#111923",
           }}
         >
-          V
+          C
         </div>
         <h1
           style={{
@@ -50,7 +50,7 @@ export default function BlockedPage() {
           Access Restricted
         </h1>
         <p style={{ fontSize: 13, lineHeight: 1.6, marginBottom: 16 }}>
-          VoltLane is not available in {country} due to sanctions or regional compliance restrictions.
+          CasterCycle is not available in {country} due to sanctions or regional compliance restrictions.
         </p>
         <p style={{ fontSize: 11, color: "rgba(255,255,255,0.42)" }}>
           This app does not offer cash prizes, withdrawals, gambling, custody, or token rewards.

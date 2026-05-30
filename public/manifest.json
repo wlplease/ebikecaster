@@ -1,7 +1,7 @@
 {
-  "name": "VoltLane",
-  "short_name": "VoltLane",
-  "description": "A daily side-scrolling e-bike ride for Farcaster.",
+  "name": "CasterCycle",
+  "short_name": "CasterCycle",
+  "description": "A daily forward-scrolling Farcaster e-bike runner.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#101b26",
@@ -9,7 +9,7 @@
   "orientation": "portrait",
   "icons": [
     {
-      "src": "/media/voltlane.png",
+      "src": "/media/castercycle.png",
       "sizes": "1024x1024",
       "type": "image/png",
       "purpose": "any maskable"

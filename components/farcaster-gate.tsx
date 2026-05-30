@@ -89,8 +89,8 @@ export function FarcasterGate({ children }: { children: React.ReactNode }) {
       <div className="flex h-dvh w-full max-w-[520px] mx-auto items-center justify-center bg-[#101b26]">
         <div className="flex flex-col items-center gap-4">
           <div className="text-3xl font-black tracking-tight">
-            <span className="text-[#fbe764]">Volt</span>
-            <span className="text-[#7cf2ff]">Lane</span>
+            <span className="text-[#fbe764]">Caster</span>
+            <span className="text-[#7cf2ff]">Cycle</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#fbe764]" />

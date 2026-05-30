@@ -1,10 +1,10 @@
-// VoltLane - Daily and weekly access passes (USDC on Base)
+// CasterCycle - Daily and weekly access passes (USDC on Base)
 
 import { useReadContract } from "wagmi";
 
 // ── Contract Addresses ──
 
-/** VoltLane pass contract on Base (daily/weekly pass system) */
+/** CasterCycle pass contract on Base (daily/weekly pass system) */
 export const PRO_PASS_CONTRACT = "0xa6c2e5ea11923f44839412d1f36026fb2f5af014" as `0x${string}`;
 
 /** Legacy ProPass contract — grandfathered monthly subscribers */
@@ -21,7 +21,7 @@ export const DAILY_PRICE = 500_000;
 /** Weekly pass price: $2.00 = 2,000,000 */
 export const WEEKLY_PRICE = 2_000_000;
 
-// VoltLane pass ABI
+// CasterCycle pass ABI
 
 export const PRO_PASS_ABI = [
   // Constructor
@@ -324,10 +324,10 @@ export const USDC_ABI = [
 ] as const;
 
 // ── Hook: useProStatus ──
-// Checks BOTH the current VoltLane pass and legacy ProPass for grandfathered subscribers.
+// Checks BOTH the current CasterCycle pass and legacy ProPass for grandfathered subscribers.
 
 export function useProStatus(address?: string) {
-  // Current VoltLane pass contract.
+  // Current CasterCycle pass contract.
   const { data: isActiveData, isLoading: loadingActive } = useReadContract({
     address: PRO_PASS_CONTRACT,
     abi: PRO_PASS_ABI,
