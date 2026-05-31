@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 
 const ETH_ADDRESS_REGEX = /^0x[0-9a-f]{40}$/i;
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
-const ROUTE_NAMES = ["Community Park", "State Park", "E-Bike Land"];
+const ROUTE_NAMES = ["Community Park", "State Park", "E-Bike Land", "Freestyle Park"];
+const SCORE_MODES = ["dash", "freestyle"] as const;
 
 const scoreSchema = z.object({
   dateKey: z.string().regex(DATE_REGEX),
@@ -26,6 +27,7 @@ const scoreSchema = z.object({
   displayName: z.string().max(80).optional().default(""),
   pfpUrl: z.string().url().max(500).optional().or(z.literal("")).default(""),
   address: z.string().regex(ETH_ADDRESS_REGEX).optional().or(z.literal("")).default(""),
+  mode: z.enum(SCORE_MODES).optional().default("dash"),
 });
 
 function json(data: unknown, status = 200) {
@@ -67,6 +69,10 @@ function expectedRoute(routeName: string) {
 }
 
 function plausibleScore(payload: z.infer<typeof scoreSchema>) {
+  if (payload.mode === "freestyle") {
+    const ceiling = Math.round(payload.distance * 0.28 + payload.pickups * 420 + payload.boosts * 260 + 2200);
+    return payload.score <= ceiling;
+  }
   const ceiling = Math.round(
     payload.distance * 0.96 +
       payload.pickups * 270 +
@@ -131,6 +137,10 @@ export async function GET(request: NextRequest) {
   const scope = request.nextUrl.searchParams.get("scope") === "friends" ? "friends" : "global";
   const period = request.nextUrl.searchParams.get("period") === "weekly" ? "weekly" : "daily";
   const fid = Number(request.nextUrl.searchParams.get("fid") || "0");
+  const compact = request.nextUrl.searchParams.get("compact") === "1";
+  const mode = request.nextUrl.searchParams.get("mode") === "freestyle" ? "freestyle" : "dash";
+  const requestedLimit = Number(request.nextUrl.searchParams.get("limit") || "");
+  const resultLimit = Number.isFinite(requestedLimit) ? Math.min(25, Math.max(3, Math.floor(requestedLimit))) : 25;
 
   if (!DATE_REGEX.test(dateKey)) {
     return json({ error: "Invalid date." }, 400);
@@ -147,7 +157,7 @@ export async function GET(request: NextRequest) {
       whereField: keyField,
       whereValue: keyValue,
       orderField: "score",
-      limit: scope === "friends" ? 100 : 25,
+      limit: scope === "friends" || mode === "freestyle" ? Math.max(25, resultLimit * 4) : resultLimit,
     });
 
     let rows = snap.map((doc) => {
@@ -163,19 +173,26 @@ export async function GET(request: NextRequest) {
         routeName: String(data.routeName || data.bestRouteName || ""),
         bestDateKey: String(data.bestDateKey || data.dateKey || ""),
         skin: String(data.skin || "signal"),
+        mode: String(data.mode || (String(data.routeName || data.bestRouteName || "") === "Freestyle Park" ? "freestyle" : "dash")),
       };
-    });
+    }).filter((row) => row.mode === mode);
 
     if (scope === "friends") {
       const fids = await followingFids(fid);
-      rows = fids ? rows.filter((row) => fids.has(row.fid)).slice(0, 25) : rows.slice(0, 25);
+      rows = fids ? rows.filter((row) => fids.has(row.fid)).slice(0, resultLimit) : rows.slice(0, resultLimit);
+    }
+
+    if (compact) {
+      return json({ ok: true, rows, scope, period, weekKey, compact: true, friendsResolved: scope === "friends" && !!process.env.NEYNAR_API_KEY });
     }
 
     const counterDocs = await Promise.all(
       rows.map((row) =>
         getDoc(
           period === "weekly" ? "castercycle-scores" : "castercycle-weekly-scores",
-          period === "weekly" ? `${dateKey}:${row.fid}` : `${weekKey}:${row.fid}`,
+          period === "weekly"
+            ? `${dateKey}${mode === "freestyle" ? ":freestyle" : ""}:${row.fid}`
+            : `${weekKey}${mode === "freestyle" ? ":freestyle" : ""}:${row.fid}`,
         ),
       ),
     );
@@ -215,9 +232,10 @@ export async function POST(request: NextRequest) {
 
   try {
     if (!firebaseRestConfigured()) return json({ ok: false, configured: false }, 202);
-    const docId = `${payload.dateKey}:${fid}`;
+    const modePrefix = payload.mode === "freestyle" ? ":freestyle" : "";
+    const docId = `${payload.dateKey}${modePrefix}:${fid}`;
     const weekKey = weekKeyFromDateKey(payload.dateKey);
-    const weeklyId = `${weekKey}:${fid}`;
+    const weeklyId = `${weekKey}${modePrefix}:${fid}`;
     const [existing, existingWeekly] = await Promise.all([
       getDoc("castercycle-scores", docId),
       getDoc("castercycle-weekly-scores", weeklyId),
@@ -248,6 +266,7 @@ export async function POST(request: NextRequest) {
         ...profile,
         weekKey,
         score: payload.score,
+        mode: payload.mode,
         bestDateKey: payload.dateKey,
         bestRouteName: payload.routeName,
         skin: payload.skin,

@@ -17,6 +17,9 @@ const LINE_IDS = [
   "nearMiss",
   "hit",
   "finalStretch",
+  "parkZone",
+  "parkBoost",
+  "paywall",
 ] as const;
 type LineId = (typeof LINE_IDS)[number];
 
@@ -34,6 +37,9 @@ const VOICE_BY_LINE: Record<LineId, string> = {
   nearMiss: process.env.ELEVENLABS_VOICE_PRIYA || "atf1ppeJGCYFBlCLZ26e",
   hit: process.env.ELEVENLABS_VOICE_SYSTEM || "bHMGij7OhWM9CNyCNeSn",
   finalStretch: process.env.ELEVENLABS_VOICE_VALE || "UgBBYS2sOqTuMpoF3BR0",
+  parkZone: process.env.ELEVENLABS_VOICE_CHATTER || "goT3UYdM9bhm0n2lmKQx",
+  parkBoost: process.env.ELEVENLABS_VOICE_MARA || "iEbJsqzb6jw8MYxZ2xca",
+  paywall: process.env.ELEVENLABS_VOICE_LEGAL || "CeNX9CMwmxDxUF5Q2Inm",
 };
 
 function json(data: unknown, status = 200) {
@@ -67,6 +73,9 @@ function voiceLine(line: LineId, request: NextRequest) {
   if (line === "nearMiss") return "Threaded traffic. Smooth hands.";
   if (line === "hit") return "Contact. Rebuild the combo and find charge.";
   if (line === "finalStretch") return "Final stretch. Empty the battery and bring the score home.";
+  if (line === "parkZone") return `${route} discovered. New park line opened.`;
+  if (line === "parkBoost") return `${route} boost. Chain the next landmark.`;
+  if (line === "paywall") return "Free ride complete. A one dollar day pass keeps Freestyle open today, or lifetime unlock is seven dollars.";
   return "Credits ready. Claim your verified ride rewards on Base.";
 }
 

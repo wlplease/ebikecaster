@@ -15,7 +15,6 @@ import {
   Map,
   Play,
   Radio,
-  RotateCcw,
   Share2,
   ShieldCheck,
   Sparkles,
@@ -58,6 +57,7 @@ type Lane = -1 | 0 | 1;
 type EntityKind = "bolt" | "battery" | "ring" | "cone" | "pothole" | "barrier" | "ramp" | "gate";
 type LeaderboardScope = "global" | "friends";
 type LeaderboardPeriod = "daily" | "weekly";
+type LeaderboardMode = "dash" | "freestyle";
 type DashboardTab = "ride" | "shop" | "garage" | "club" | "leaders";
 type RideArea = "park" | "statePark" | "bikeLand";
 type MissionKind = "combo" | "clean" | "boosts" | "battery" | "bolts";
@@ -75,7 +75,10 @@ type VoiceLineId =
   | "combo"
   | "nearMiss"
   | "hit"
-  | "finalStretch";
+  | "finalStretch"
+  | "parkZone"
+  | "parkBoost"
+  | "paywall";
 type HapticKind = "selection" | "light" | "medium" | "heavy" | "success" | "warning" | "error";
 type PassPlan = "day" | "lifetime";
 
@@ -199,6 +202,15 @@ type LeaderboardRow = {
   routeName: string;
   bestDateKey?: string;
   skin: string;
+  mode?: LeaderboardMode;
+};
+
+type ParkObjective = {
+  id: string;
+  label: string;
+  value: string;
+  progress: number;
+  done: boolean;
 };
 
 type LoungeMessage = {
@@ -212,6 +224,7 @@ type LoungeMessage = {
 };
 
 type FreeRideModel = {
+  area: RideArea;
   x: number;
   y: number;
   heading: number;
@@ -221,6 +234,9 @@ type FreeRideModel = {
   parkScore: number;
   combo: number;
   pickupCooldown: number;
+  voiceCooldown: number;
+  submitted: boolean;
+  terrain: string;
   message: string;
   messageT: number;
   zone: string;
@@ -236,8 +252,17 @@ type FreeRideHud = {
   score: number;
   combo: number;
   message: string;
+  objectives: ParkObjective[];
+  terrain: string;
   unlimited: boolean;
   zone: string;
+};
+
+type PassReceipt = {
+  plan: PassPlan;
+  txLabel: string;
+  purchasedAt: number;
+  validUntil: number;
 };
 
 const ROUTES: RouteTheme[] = [
@@ -309,6 +334,23 @@ const FREE_RIDE_SPOTS = [
   { name: "Pine Loop", short: "Pines", x: 80, y: -980, color: "#2e714d" },
   { name: "E-Bike Land", short: "Glow", x: 1010, y: -890, color: "#ff7adf" },
   { name: "Trailhead", short: "Start", x: 0, y: 0, color: "#fbe764" },
+] as const;
+
+const FREE_RIDE_PATHS = [
+  [[-1040, -760], [-600, -520], [-180, -360], [260, -80], [880, 120]],
+  [[-980, 120], [-500, 10], [-60, 40], [480, -160], [1060, -580]],
+  [[-880, 820], [-340, 520], [140, 520], [760, 760]],
+  [[0, -1180], [0, -620], [0, -60], [0, 700], [0, 1120]],
+] as const;
+
+const STREAM_PATH = [
+  [-1260, 520],
+  [-760, 270],
+  [-560, 650],
+  [-160, 390],
+  [260, 116],
+  [530, 340],
+  [1180, 120],
 ] as const;
 
 function localDateKey(date = new Date()) {
@@ -531,6 +573,62 @@ function freeRideZone(x: number, y: number) {
   return best.name;
 }
 
+function pointSegmentDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lengthSq = dx * dx + dy * dy || 1;
+  const t = clamp(((px - ax) * dx + (py - ay) * dy) / lengthSq, 0, 1);
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+function distanceToPath(x: number, y: number, path: readonly (readonly [number, number])[]) {
+  let best = Number.POSITIVE_INFINITY;
+  for (let index = 1; index < path.length; index += 1) {
+    const [ax, ay] = path[index - 1];
+    const [bx, by] = path[index];
+    best = Math.min(best, pointSegmentDistance(x, y, ax, ay, bx, by));
+  }
+  return best;
+}
+
+function freeRideTerrain(x: number, y: number, area: RideArea) {
+  const streamDistance = distanceToPath(x, y, STREAM_PATH);
+  const pathDistance = Math.min(...FREE_RIDE_PATHS.map((path) => distanceToPath(x, y, path)));
+  if (streamDistance < 54) return { label: "Stream", short: "water", drag: 54, score: 0.08, warning: true };
+  if (area === "statePark" && y < -680 && pathDistance < 92) return { label: "Downhill", short: "hill", drag: -10, score: 0.18, warning: false };
+  if (pathDistance < 46) return { label: "Path", short: "path", drag: 12, score: 0.16, warning: false };
+  return { label: "Grass", short: "grass", drag: 36, score: 0.09, warning: false };
+}
+
+function freeRideObjectives(free: FreeRideModel): ParkObjective[] {
+  const zoneTarget = 4;
+  const distanceTarget = 800;
+  const comboTarget = 5;
+  return [
+    {
+      id: "zones",
+      label: "Explore",
+      value: `${Math.min(free.visitedZones.length, zoneTarget)}/${zoneTarget}`,
+      progress: clamp(free.visitedZones.length / zoneTarget, 0, 1),
+      done: free.visitedZones.length >= zoneTarget,
+    },
+    {
+      id: "distance",
+      label: "Cruise",
+      value: `${Math.min(Math.round(free.distance), distanceTarget)}m`,
+      progress: clamp(free.distance / distanceTarget, 0, 1),
+      done: free.distance >= distanceTarget,
+    },
+    {
+      id: "combo",
+      label: "Flow",
+      value: `${Math.min(free.combo, comboTarget)}x`,
+      progress: clamp(free.combo / comboTarget, 0, 1),
+      done: free.combo >= comboTarget,
+    },
+  ];
+}
+
 function skinShortName(name: string) {
   return name
     .replace(" Yellow", "")
@@ -567,6 +665,7 @@ export default function CasterCycleApp() {
   const motorAudioRef = useRef<MotorAudio | null>(null);
   const voiceRef = useRef<HTMLAudioElement | null>(null);
   const freeRideRef = useRef<FreeRideModel>({
+    area: "park",
     x: 0,
     y: 0,
     heading: -Math.PI / 2,
@@ -576,6 +675,9 @@ export default function CasterCycleApp() {
     parkScore: 0,
     combo: 0,
     pickupCooldown: 0,
+    voiceCooldown: 0,
+    submitted: false,
+    terrain: "Grass",
     message: "",
     messageT: 0,
     zone: "Trailhead",
@@ -592,14 +694,37 @@ export default function CasterCycleApp() {
     score: 0,
     combo: 0,
     message: "",
+    objectives: freeRideObjectives({
+      area: "park",
+      x: 0,
+      y: 0,
+      heading: -Math.PI / 2,
+      speed: 0,
+      distance: 0,
+      remaining: FREE_ROAM_SECONDS,
+      parkScore: 0,
+      combo: 0,
+      pickupCooldown: 0,
+      voiceCooldown: 0,
+      submitted: false,
+      terrain: "Grass",
+      message: "",
+      messageT: 0,
+      zone: "Trailhead",
+      warned: false,
+      visitedZones: ["Trailhead"],
+    }),
+    terrain: "grass",
     unlimited: false,
     zone: "Trailhead",
   });
   const [stats, setStats] = useState<PersistedStats>({ bestToday: 0, bestAll: 0, streak: 0, lastRideDate: null });
   const [selectedSkin, setSelectedSkin] = useState("signal");
   const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
+  const [socialRows, setSocialRows] = useState<LeaderboardRow[]>([]);
   const [leaderboardScope, setLeaderboardScope] = useState<LeaderboardScope>("global");
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<LeaderboardPeriod>("daily");
+  const [leaderboardMode, setLeaderboardMode] = useState<LeaderboardMode>("dash");
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>("ride");
   const [rideArea, setRideArea] = useState<RideArea>("park");
   const [ethSupporter, setEthSupporter] = useState(false);
@@ -610,6 +735,9 @@ export default function CasterCycleApp() {
   const [showIntro, setShowIntro] = useState(false);
   const [showWelcomeBack, setShowWelcomeBack] = useState(false);
   const [introStep, setIntroStep] = useState(0);
+  const [upgradeIntent, setUpgradeIntent] = useState(false);
+  const [claimedBadge, setClaimedBadge] = useState(false);
+  const [passReceipts, setPassReceipts] = useState<PassReceipt[]>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
 
@@ -643,6 +771,13 @@ export default function CasterCycleApp() {
       const savedSkin = localStorage.getItem(`${STORAGE_PREFIX}:skin`);
       if (savedSkin && SKINS.some((item) => item.id === savedSkin)) setSelectedSkin(savedSkin);
       setEthSupporter(localStorage.getItem(`${STORAGE_PREFIX}:ethSupporter`) === "1");
+      setClaimedBadge(localStorage.getItem(`${STORAGE_PREFIX}:badge:${dateKey}`) === "1");
+      try {
+        const receipts = JSON.parse(localStorage.getItem(`${STORAGE_PREFIX}:passReceipts`) || "[]") as PassReceipt[];
+        setPassReceipts(Array.isArray(receipts) ? receipts.slice(0, 5) : []);
+      } catch {
+        setPassReceipts([]);
+      }
       const savedDayUntil = Math.max(
         Number(localStorage.getItem(`${STORAGE_PREFIX}:dayUntil`) || "0"),
         Number(localStorage.getItem(`${STORAGE_PREFIX}:weeklyUntil`) || "0"),
@@ -698,6 +833,8 @@ export default function CasterCycleApp() {
       score: free.parkScore,
       combo: free.combo,
       message: free.messageT > 0 ? free.message : "",
+      objectives: freeRideObjectives(free),
+      terrain: freeRideTerrain(free.x, free.y, free.area).short,
       unlimited: effectivePro,
       zone: free.zone,
     });
@@ -886,16 +1023,32 @@ export default function CasterCycleApp() {
     }
   }, [playVoice, voiceEnabled]);
 
-  const loadLeaderboard = useCallback(async (scope: LeaderboardScope = leaderboardScope, period: LeaderboardPeriod = leaderboardPeriod) => {
+  const loadLeaderboard = useCallback(async (
+    scope: LeaderboardScope = leaderboardScope,
+    period: LeaderboardPeriod = leaderboardPeriod,
+    mode: LeaderboardMode = leaderboardMode,
+  ) => {
     const current = gameRef.current;
     try {
-      const url = `/api/scores?dateKey=${encodeURIComponent(current.dateKey)}&scope=${scope}&period=${period}&fid=${user?.fid ?? 0}`;
+      const url = `/api/scores?dateKey=${encodeURIComponent(current.dateKey)}&scope=${scope}&period=${period}&mode=${mode}&fid=${user?.fid ?? 0}`;
       const res = await fetch(url, { cache: "no-store" });
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data.rows)) setLeaderboard(data.rows);
     } catch {}
-  }, [leaderboardPeriod, leaderboardScope, user?.fid]);
+  }, [leaderboardMode, leaderboardPeriod, leaderboardScope, user?.fid]);
+
+  const loadSocialPreview = useCallback(async () => {
+    const current = gameRef.current;
+    try {
+      const scope = user?.fid ? "friends" : "global";
+      const url = `/api/scores?dateKey=${encodeURIComponent(current.dateKey)}&scope=${scope}&period=daily&mode=dash&fid=${user?.fid ?? 0}&compact=1&limit=5`;
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.rows)) setSocialRows(data.rows);
+    } catch {}
+  }, [user?.fid]);
 
   const submitScore = useCallback(async (finishedGame: GameModel) => {
     if (finishedGame.submitted) return;
@@ -903,6 +1056,7 @@ export default function CasterCycleApp() {
     const body = {
       dateKey: finishedGame.dateKey,
       routeName: finishedGame.route.name,
+      mode: "dash" as const,
       score: finishedGame.score,
       distance: Math.round(finishedGame.distance),
       battery: Math.round(finishedGame.battery),
@@ -938,8 +1092,53 @@ export default function CasterCycleApp() {
       setToast("Leaderboard saved locally");
     } finally {
       loadLeaderboard(leaderboardScope, leaderboardPeriod);
+      loadSocialPreview();
     }
-  }, [address, leaderboardPeriod, leaderboardScope, loadLeaderboard, selectedSkin, user]);
+  }, [address, leaderboardPeriod, leaderboardScope, loadLeaderboard, loadSocialPreview, selectedSkin, user]);
+
+  const submitFreestyleScore = useCallback(async (free: FreeRideModel) => {
+    if (free.submitted || free.distance < 20) return;
+    free.submitted = true;
+    const dateKey = gameRef.current.dateKey;
+    const body = {
+      dateKey,
+      routeName: "Freestyle Park",
+      mode: "freestyle" as const,
+      score: Math.round(free.parkScore),
+      distance: Math.round(free.distance),
+      battery: 100,
+      pickups: Math.min(100, free.visitedZones.length),
+      hits: free.terrain === "Stream" ? 1 : 0,
+      boosts: Math.min(100, free.combo),
+      nearMisses: 0,
+      skin: selectedSkin,
+      fid: user?.fid ?? 0,
+      username: user?.username ?? "",
+      displayName: user?.displayName ?? "",
+      pfpUrl: user?.pfpUrl ?? "",
+      address: address ?? "",
+    };
+
+    try {
+      const bestKey = `${STORAGE_PREFIX}:freestyleBest:${dateKey}`;
+      const best = Math.max(Number(localStorage.getItem(bestKey) || "0"), body.score);
+      localStorage.setItem(bestKey, String(best));
+    } catch {}
+
+    if (!user?.fid) return;
+    try {
+      await sdk.quickAuth.fetch("/api/scores", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      setToast("Freestyle saved locally");
+    } finally {
+      loadLeaderboard(leaderboardScope, leaderboardPeriod, leaderboardMode);
+      loadSocialPreview();
+    }
+  }, [address, leaderboardMode, leaderboardPeriod, leaderboardScope, loadLeaderboard, loadSocialPreview, selectedSkin, user]);
 
   const finishRide = useCallback((reason: "course" | "battery" = "course") => {
     const current = gameRef.current;
@@ -1004,19 +1203,23 @@ export default function CasterCycleApp() {
   }, [setMiniAppAdded]);
 
   const stopFreeRide = useCallback((showShop = false) => {
+    submitFreestyleScore(freeRideRef.current);
     setFreeRideActive(false);
     stopMotor();
     if (showShop) {
       setDashboardTab("shop");
-      setToast("30 seconds free. Unlock unlimited park play.");
+      setUpgradeIntent(true);
+      setToast("Keep riding with Cycle Pass");
       haptic("warning");
+      playVoice("paywall");
     }
-  }, [stopMotor]);
+  }, [playVoice, stopMotor, submitFreestyleScore]);
 
   const startFreeRide = useCallback(() => {
     const free = freeRideRef.current;
+    free.area = rideArea;
     free.x = 0;
-    free.y = 0;
+    free.y = rideArea === "statePark" ? -920 : 0;
     free.heading = -Math.PI / 2;
     free.speed = 210;
     free.distance = 0;
@@ -1024,21 +1227,25 @@ export default function CasterCycleApp() {
     free.parkScore = 0;
     free.combo = 0;
     free.pickupCooldown = 0;
+    free.voiceCooldown = 0;
+    free.submitted = false;
+    free.terrain = rideArea === "statePark" ? "Downhill" : "Grass";
     free.message = "";
     free.messageT = 0;
-    free.zone = "Trailhead";
+    free.zone = rideArea === "statePark" ? "Pine Loop" : "Trailhead";
     free.warned = false;
-    free.visitedZones = ["Trailhead"];
+    free.visitedZones = [free.zone];
     gameRef.current.phase = "ready";
     setFreeRideActive(true);
+    setUpgradeIntent(false);
     setShowIntro(false);
     setShowWelcomeBack(false);
     setDashboardTab("ride");
-    setToast(effectivePro ? "Unlimited freestyle" : "30 seconds free");
+    setToast(rideArea === "statePark" ? "State Park roam" : effectivePro ? "Unlimited freestyle" : "30 seconds free");
     haptic("success");
     playSfx("start");
     if (voiceEnabled) playVoice("ready", { route: "Freestyle Park" });
-  }, [effectivePro, playSfx, playVoice, voiceEnabled]);
+  }, [effectivePro, playSfx, playVoice, rideArea, voiceEnabled]);
 
   const changeLane = useCallback((direction: -1 | 1) => {
     if (freeRideActive) {
@@ -1157,17 +1364,17 @@ export default function CasterCycleApp() {
     const castText = `I'm riding ${current.route.name} in CasterCycle.\n\nFree park rides, daily scores, friend leaderboards, and Base unlocks:\n${SHARE_URL}`;
     setSharing(true);
     try {
-      await shareCast(castText, [`${APP_URL}/media/castercycle-card.png`, SHARE_URL], "Invite copied");
+      await shareCast(castText, [`${APP_URL}/api/share-image?mode=invite&route=${encodeURIComponent(current.route.name)}&user=${encodeURIComponent(displayName)}`, SHARE_URL], "Invite copied");
     } finally {
       setSharing(false);
     }
-  }, [shareCast]);
+  }, [displayName, shareCast]);
 
   const shareRide = useCallback(async () => {
     const current = gameRef.current;
     const mission = missionStatus(current);
     const missionText = mission.done ? `\nDaily mission cleared: ${current.mission.title}.` : "";
-    const shareImageUrl = `${APP_URL}/api/share-image?score=${current.score}&route=${encodeURIComponent(current.route.name)}&user=${encodeURIComponent(displayName)}&skin=${encodeURIComponent(skin.name)}&date=${current.dateKey}&mission=${encodeURIComponent(mission.done ? `${current.mission.title} cleared` : current.mission.goal)}`;
+    const shareImageUrl = `${APP_URL}/api/share-image?mode=dash&score=${current.score}&route=${encodeURIComponent(current.route.name)}&user=${encodeURIComponent(displayName)}&skin=${encodeURIComponent(skin.name)}&date=${current.dateKey}&mission=${encodeURIComponent(mission.done ? `${current.mission.title} cleared` : current.mission.goal)}`;
     const castText = `I scored ${current.score.toLocaleString()} in CasterCycle's ${current.route.name}.${missionText}\n\n${current.pickups} charge bolts, ${current.boosts} boosts, ${Math.round(current.battery)}% battery left. Beat my park ride:\n${SHARE_URL}`;
     setSharing(true);
     try {
@@ -1176,6 +1383,23 @@ export default function CasterCycleApp() {
       setSharing(false);
     }
   }, [displayName, shareCast, skin.name]);
+
+  const claimDailyBadge = useCallback(() => {
+    try {
+      localStorage.setItem(`${STORAGE_PREFIX}:badge:${gameRef.current.dateKey}`, "1");
+    } catch {}
+    setClaimedBadge(true);
+    setToast("Daily badge claimed");
+    haptic("success");
+  }, []);
+
+  const shareChallenge = useCallback(async (row: LeaderboardRow) => {
+    const name = row.username ? `@${row.username}` : row.displayName || "this rider";
+    const scoreValue = (leaderboardMode === "freestyle" ? row.score : row.dailyScore || row.score).toLocaleString();
+    const modeLabel = leaderboardMode === "freestyle" ? "Freestyle Park" : "Daily Dash";
+    const text = `I'm chasing ${name}'s ${scoreValue} in CasterCycle ${modeLabel}.\n\nRide with me:\n${SHARE_URL}`;
+    await shareCast(text, [`${APP_URL}/api/share-image?mode=${leaderboardMode === "freestyle" ? "freestyle" : "dash"}&score=${encodeURIComponent(scoreValue)}&route=${encodeURIComponent(modeLabel)}&user=${encodeURIComponent(displayName)}&mission=${encodeURIComponent(`Chasing ${name}`)}`, SHARE_URL], "Challenge copied");
+  }, [displayName, leaderboardMode, shareCast]);
 
   const connectWallet = useCallback(() => {
     const connector = connectors.find((item) => item.id.toLowerCase().includes("farcaster")) ?? connectors[0];
@@ -1197,10 +1421,19 @@ export default function CasterCycleApp() {
     const until = Math.floor(Date.now() / 1000) + seconds;
     if (plan === "day") setDayUntil(until);
     else setAnnualUntil(until);
+    const receipt: PassReceipt = {
+      plan,
+      txLabel: plan === "day" ? "$1 USDC day pass" : "$7 USDC lifetime",
+      purchasedAt: Math.floor(Date.now() / 1000),
+      validUntil: until,
+    };
+    const nextReceipts = [receipt, ...passReceipts].slice(0, 5);
+    setPassReceipts(nextReceipts);
     try {
       localStorage.setItem(`${STORAGE_PREFIX}:${key}`, String(until));
       localStorage.setItem(`${STORAGE_PREFIX}:skin`, "carbon");
       localStorage.setItem(`${STORAGE_PREFIX}:rideArea`, "bikeLand");
+      localStorage.setItem(`${STORAGE_PREFIX}:passReceipts`, JSON.stringify(nextReceipts));
     } catch {}
     setSelectedSkin("carbon");
     const unlockedArea = "bikeLand";
@@ -1208,8 +1441,9 @@ export default function CasterCycleApp() {
     gameRef.current = makeGame(unlockedArea);
     syncHud();
     setToast(plan === "day" ? "Unlimited day pass active" : "Lifetime unlimited active");
+    setUpgradeIntent(false);
     haptic("success");
-  }, [syncHud]);
+  }, [passReceipts, syncHud]);
 
   const chooseRideArea = useCallback((area: RideArea) => {
     if (area === "bikeLand" && !effectivePro) {
@@ -1232,7 +1466,8 @@ export default function CasterCycleApp() {
   useEffect(() => {
     loadStats(gameRef.current.dateKey);
     loadLeaderboard("global", "daily");
-  }, [loadLeaderboard, loadStats]);
+    loadSocialPreview();
+  }, [loadLeaderboard, loadSocialPreview, loadStats]);
 
   useEffect(() => {
     farcasterHapticsEnabled = hapticsEnabled;
@@ -1327,12 +1562,18 @@ export default function CasterCycleApp() {
         const wasRemaining = free.remaining;
         if (free.messageT > 0) free.messageT = Math.max(0, free.messageT - dt);
         if (free.pickupCooldown > 0) free.pickupCooldown = Math.max(0, free.pickupCooldown - dt);
-        free.speed = clamp(free.speed - dt * 24, 0, effectivePro ? 430 : 360);
+        const terrain = freeRideTerrain(free.x, free.y, free.area);
+        free.terrain = terrain.label;
+        free.speed = clamp(free.speed - dt * terrain.drag, 0, effectivePro ? 455 : 370);
         const move = free.speed * dt;
         free.x = clamp(free.x + Math.cos(free.heading) * move, -1180, 1180);
         free.y = clamp(free.y + Math.sin(free.heading) * move, -1180, 1180);
         free.distance += move;
-        free.parkScore += move * (effectivePro ? 0.12 : 0.08);
+        free.parkScore += move * terrain.score;
+        if (terrain.warning && free.messageT <= 0.1) {
+          free.message = "Stream edge slows you";
+          free.messageT = 0.7;
+        }
         const nextZone = freeRideZone(free.x, free.y);
         if (nextZone !== free.zone) {
           free.zone = nextZone;
@@ -1345,6 +1586,10 @@ export default function CasterCycleApp() {
             free.messageT = 1.6;
             haptic("light");
             playSfx("combo");
+            if (free.voiceCooldown <= 0 && free.visitedZones.length <= 3) {
+              free.voiceCooldown = 6;
+              playVoice("parkZone", { route: nextZone });
+            }
           }
         }
         const boostSpot = FREE_RIDE_SPOTS.find((spot) => spot.name !== "Trailhead" && Math.hypot(free.x - spot.x, free.y - spot.y) < 116);
@@ -1357,8 +1602,13 @@ export default function CasterCycleApp() {
           free.messageT = 1.25;
           haptic("medium");
           playSfx("boost");
+          if (free.voiceCooldown <= 0 && free.combo >= 3) {
+            free.voiceCooldown = 6;
+            playVoice("parkBoost", { route: boostSpot.short });
+          }
         }
         if (!effectivePro) free.remaining = Math.max(0, free.remaining - dt);
+        if (free.voiceCooldown > 0) free.voiceCooldown = Math.max(0, free.voiceCooldown - dt);
         if (!effectivePro && !free.warned && free.remaining <= 5 && free.remaining > 0) {
           free.warned = true;
           setToast("5 seconds left");
@@ -1658,7 +1908,7 @@ export default function CasterCycleApp() {
             <Metric icon={<Gauge size={14} />} label="mph" value={String(Math.round(freeRideHud.speed / 8))} />
             <Metric icon={<Trophy size={14} />} label="score" value={Math.round(freeRideHud.score).toLocaleString()} />
             <Metric icon={<Flame size={14} />} label="combo" value={`${freeRideHud.combo}x`} />
-            <Metric icon={<BatteryCharging size={14} />} label="time" value={freeRideHud.unlimited ? "∞" : `${Math.ceil(freeRideHud.remaining)}s`} />
+            <Metric icon={<Map size={14} />} label="surface" value={freeRideHud.terrain} />
           </div>
           <div className="pointer-events-auto mt-2 grid grid-cols-4 gap-2">
             <button aria-label="Turn left" className="inline-flex min-h-11 items-center justify-center gap-0.5 rounded-md border border-white/18 bg-black/32 px-1 text-[10px] font-black uppercase tracking-[0.04em] text-white/80 backdrop-blur-md active:scale-[0.98]" onClick={() => changeLane(-1)}>
@@ -1735,6 +1985,10 @@ export default function CasterCycleApp() {
                 onAdd={addMiniApp}
                 onSkip={() => closeIntro(false)}
                 onStart={() => closeIntro(true)}
+                onRoam={() => {
+                  closeIntro(false);
+                  requestAnimationFrame(() => startFreeRide());
+                }}
               />
             ) : hud.phase === "ready" && showWelcomeBack && !miniAppAdded ? (
               <WelcomeBackPanel
@@ -1744,17 +1998,16 @@ export default function CasterCycleApp() {
                 onDismiss={() => setShowWelcomeBack(false)}
                 onShare={shareApp}
                 onStart={startRide}
+                onRoam={startFreeRide}
               />
             ) : (
               <>
-                <div className="flex items-start justify-between gap-4 rounded-md border border-white/8 bg-white/[0.04] p-3">
+                <div className="flex items-center justify-between gap-3 rounded-md border border-white/8 bg-white/[0.04] p-3">
                   <div className="min-w-0">
                     <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[#7cf2ff]">{resultLabel}</div>
-                    <h1 className="mt-1 text-2xl font-black leading-none tracking-normal text-white">CasterCycle</h1>
-                    <p className="mt-2 max-w-[20rem] text-sm font-medium leading-5 text-white/68">
-                      {hud.phase === "finished"
-                        ? `${displayName} scored ${hud.score.toLocaleString()} on ${game.route.name}.`
-                        : `${game.route.name}. Daily route, clean line, best score.`}
+                    <h1 className="mt-1 truncate text-2xl font-black leading-none tracking-normal text-white">{dashboardTab === "ride" ? "Play" : dashboardTab === "shop" ? "Pass" : dashboardTab === "garage" ? "Garage" : dashboardTab === "club" ? "Club" : "Rank"}</h1>
+                    <p className="mt-1 truncate text-sm font-medium leading-5 text-white/64">
+                      {hud.phase === "finished" ? `${hud.score.toLocaleString()} on ${game.route.name}` : `${game.route.name} · ${displayName}`}
                     </p>
                   </div>
                   <div className="shrink-0">
@@ -1770,9 +2023,9 @@ export default function CasterCycleApp() {
 
                 <div className="mt-3 grid grid-cols-5 gap-1 rounded-md border border-white/10 bg-[#02070c]/55 p-1 shadow-inner">
                   {([
-                    { id: "ride", label: "Worlds", icon: <Map size={15} /> },
-                    { id: "shop", label: "Shop", icon: <Wallet size={15} /> },
-                    { id: "garage", label: "Bike", icon: <Bike size={15} /> },
+                    { id: "ride", label: "Play", icon: <Play size={15} /> },
+                    { id: "shop", label: "Pass", icon: <Wallet size={15} /> },
+                    { id: "garage", label: "Garage", icon: <Bike size={15} /> },
                     { id: "club", label: "Club", icon: <Users size={15} /> },
                     { id: "leaders", label: "Rank", icon: <Trophy size={15} /> },
                   ] as { id: DashboardTab; label: string; icon: React.ReactNode }[]).map((item) => (
@@ -1801,6 +2054,7 @@ export default function CasterCycleApp() {
                       bestToday={Math.max(stats.bestToday, hud.score)}
                       bestAll={Math.max(stats.bestAll, hud.score)}
                       streak={stats.streak}
+                      socialRows={socialRows}
                       proActive={effectivePro}
                       dayActive={dayActive}
                       lifetimeActive={annualActive}
@@ -1811,6 +2065,15 @@ export default function CasterCycleApp() {
                       onShop={() => setDashboardTab("shop")}
                       onShare={hud.phase === "finished" ? shareRide : shareApp}
                     />
+
+                    {hud.phase === "finished" && (
+                      <DailyRewardPanel
+                        claimed={claimedBadge}
+                        onClaim={claimDailyBadge}
+                        onShare={shareRide}
+                        onShop={() => setDashboardTab("shop")}
+                      />
+                    )}
 
                     <MissionPanel mission={game.mission} status={mission} />
 
@@ -1851,11 +2114,13 @@ export default function CasterCycleApp() {
                       isPro={effectivePro}
                       dayActive={dayActive}
                       annualActive={annualActive}
+                      urgent={upgradeIntent}
                       onConnect={connectWallet}
                       onEthSupport={unlockEthSupporter}
                       onPassPurchased={unlockPass}
                       onVoiceInfo={() => playVoice("legal", {}, true)}
                     />
+                    <PassHistoryPanel receipts={passReceipts} dayActive={dayActive} annualActive={annualActive} passUntil={passUntil} />
                   </>
                 )}
 
@@ -1875,14 +2140,20 @@ export default function CasterCycleApp() {
                     rows={leaderboard}
                     scope={leaderboardScope}
                     period={leaderboardPeriod}
+                    mode={leaderboardMode}
                     onProfile={(fid) => sdk.actions.viewProfile({ fid }).catch(() => setToast("Open in Farcaster"))}
+                    onChallenge={shareChallenge}
                     onScope={(scope) => {
                       setLeaderboardScope(scope);
-                      loadLeaderboard(scope, leaderboardPeriod);
+                      loadLeaderboard(scope, leaderboardPeriod, leaderboardMode);
                     }}
                     onPeriod={(period) => {
                       setLeaderboardPeriod(period);
-                      loadLeaderboard(leaderboardScope, period);
+                      loadLeaderboard(leaderboardScope, period, leaderboardMode);
+                    }}
+                    onMode={(mode) => {
+                      setLeaderboardMode(mode);
+                      loadLeaderboard(leaderboardScope, leaderboardPeriod, mode);
                     }}
                   />
                 )}
@@ -1916,6 +2187,7 @@ function OnboardingPanel({
   onAdd,
   onSkip,
   onStart,
+  onRoam,
 }: {
   step: number;
   routeName: string;
@@ -1924,39 +2196,40 @@ function OnboardingPanel({
   onAdd: () => void;
   onSkip: () => void;
   onStart: () => void;
+  onRoam: () => void;
 }) {
   const slides = [
     {
-      icon: <Bike size={22} />,
-      kicker: "Welcome",
-      title: "Pick a park.",
-      body: `${routeName} is today's social ride. Start free, then unlock bigger worlds when you want them.`,
+      icon: <Map size={18} />,
+      kicker: "Roam",
+      title: "30s free park",
+      body: "Any direction. Paths are fast.",
       accent: "#fbe764",
     },
     {
-      icon: <Zap size={22} />,
-      kicker: "Flow",
-      title: "Chain clean lines.",
-      body: "Tap lanes, hop hazards, collect charge, and keep battery for a stronger finish.",
+      icon: <Trophy size={18} />,
+      kicker: "Dash",
+      title: "Daily score run",
+      body: `${routeName}. Beat friends.`,
       accent: "#7cf2ff",
     },
     {
-      icon: <Share2 size={22} />,
-      kicker: "Social",
-      title: "Cast the score.",
-      body: "Share the result, climb friends, save the app, and bring your Farcaster identity into the ride.",
+      icon: <Wallet size={18} />,
+      kicker: "Pass",
+      title: "$1 day / $7 life",
+      body: "Unlimited parks, bikes, lounge.",
       accent: "#a2ff9a",
     },
   ];
-  const current = slides[step] ?? slides[0];
-  const isLast = step === slides.length - 1;
+  const safeStep = Math.min(step, slides.length - 1);
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[#7cf2ff]">First ride</div>
-          <h1 className="mt-1 text-3xl font-black leading-none tracking-normal text-white">CasterCycle</h1>
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[#7cf2ff]">Welcome</div>
+          <h1 className="mt-1 text-3xl font-black leading-none tracking-normal text-white">Ride CasterCycle</h1>
+          <p className="mt-2 text-sm font-semibold leading-5 text-white/64">Pick a ride. Cast the score. Come back tomorrow.</p>
         </div>
         <Image
           src="/media/castercycle.png"
@@ -1967,42 +2240,52 @@ function OnboardingPanel({
         />
       </div>
 
-      <div className="mt-5 rounded-md border border-white/12 bg-white/7 p-4">
-        <div className="flex items-center gap-3">
-          <div
-            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border text-[#111923]"
-            style={{ background: current.accent, borderColor: current.accent }}
-          >
-            {current.icon}
-          </div>
-          <div className="min-w-0">
-            <div className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: current.accent }}>
-              {current.kicker}
-            </div>
-            <div className="mt-1 text-xl font-black leading-tight text-white">{current.title}</div>
-          </div>
-        </div>
-        <p className="mt-4 text-sm font-semibold leading-5 text-white/68">{current.body}</p>
-      </div>
-
-      <div className="mt-4 grid grid-cols-3 gap-2">
+      <div className="mt-5 grid grid-cols-3 gap-2">
         {slides.map((slide, index) => (
           <button
             key={slide.kicker}
-            aria-label={`Intro step ${index + 1}`}
-            className="h-2 rounded-full transition"
-            style={{ background: index === step ? slide.accent : "rgba(255,255,255,0.18)" }}
+            className={`min-h-[86px] rounded-md border p-2 text-left transition active:scale-[0.98] ${safeStep === index ? "bg-white/12" : "bg-white/7"}`}
+            style={{ borderColor: safeStep === index ? slide.accent : "rgba(255,255,255,0.12)" }}
             onClick={() => {
               haptic("selection");
               onStep(index);
             }}
-          />
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-md text-[#071018]" style={{ background: slide.accent }}>
+              {slide.icon}
+            </span>
+            <span className="mt-2 block text-[11px] font-black leading-tight text-white">{slide.title}</span>
+            <span className="mt-1 block text-[9px] font-bold leading-tight text-white/48">{slide.body}</span>
+          </button>
         ))}
       </div>
 
-      <div className={`mt-5 grid gap-2 ${isLast && !miniAppAdded ? "grid-cols-3" : "grid-cols-2"}`}>
+      <div className="mt-5 grid grid-cols-2 gap-2">
         <button
-          className="inline-flex min-h-12 items-center justify-center rounded-md border border-white/15 bg-white/8 px-4 text-sm font-black text-white transition active:scale-[0.98]"
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#a2ff9a] px-4 text-sm font-black text-[#071018] transition active:scale-[0.98]"
+          onClick={() => {
+            haptic("medium");
+            onRoam();
+          }}
+        >
+          <Bike size={18} />
+          Roam Free
+        </button>
+        <button
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#fbe764] px-4 text-sm font-black text-[#071018] transition active:scale-[0.98]"
+          onClick={() => {
+            haptic("medium");
+            onStart();
+          }}
+        >
+          <Play size={18} />
+          Dash
+        </button>
+      </div>
+
+      <div className={`mt-3 grid gap-2 ${!miniAppAdded ? "grid-cols-2" : "grid-cols-1"}`}>
+        <button
+          className="inline-flex min-h-10 items-center justify-center rounded-md border border-white/15 bg-white/8 px-4 text-xs font-black uppercase tracking-[0.08em] text-white/64 transition active:scale-[0.98]"
           onClick={() => {
             haptic("selection");
             onSkip();
@@ -2010,26 +2293,15 @@ function OnboardingPanel({
         >
           Skip
         </button>
-        {isLast && !miniAppAdded && (
+        {!miniAppAdded && (
           <button
-            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-3 text-xs font-black text-[#111923] transition active:scale-[0.98]"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/14 px-3 text-xs font-black uppercase tracking-[0.08em] text-white transition active:scale-[0.98]"
             onClick={onAdd}
           >
             <Sparkles size={16} />
             Add
           </button>
         )}
-        <button
-          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#fbe764] px-4 text-sm font-black text-[#111923] transition active:scale-[0.98]"
-          onClick={() => {
-            haptic(isLast ? "medium" : "selection");
-            if (isLast) onStart();
-            else onStep(step + 1);
-          }}
-        >
-          {isLast ? <Play size={18} /> : <ChevronRight size={18} />}
-          {isLast ? "Start Ride" : "Next"}
-        </button>
       </div>
     </div>
   );
@@ -2042,6 +2314,7 @@ function WelcomeBackPanel({
   onDismiss,
   onShare,
   onStart,
+  onRoam,
 }: {
   displayName: string;
   routeName: string;
@@ -2049,16 +2322,15 @@ function WelcomeBackPanel({
   onDismiss: () => void;
   onShare: () => void;
   onStart: () => void;
+  onRoam: () => void;
 }) {
   return (
     <div>
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[#7cf2ff]">Welcome back</div>
-          <h1 className="mt-1 text-3xl font-black leading-none tracking-normal text-white">CasterCycle</h1>
-          <p className="mt-2 text-sm font-semibold leading-5 text-white/68">
-            {displayName}, {routeName} is ready.
-          </p>
+          <h1 className="mt-1 text-3xl font-black leading-none tracking-normal text-white">Today’s Ride</h1>
+          <p className="mt-2 truncate text-sm font-semibold leading-5 text-white/68">{displayName} · {routeName}</p>
         </div>
         <Image
           src="/media/castercycle.png"
@@ -2069,46 +2341,49 @@ function WelcomeBackPanel({
         />
       </div>
 
-      <div className="mt-4 grid grid-cols-3 gap-2">
-        <FeatureChip icon={<Zap size={13} />} label="daily" />
-        <FeatureChip icon={<Trophy size={13} />} label="scores" />
-        <FeatureChip icon={<Wallet size={13} />} label="base" />
-      </div>
-
-      <div className="mt-4 rounded-md border border-[#fbe764]/28 bg-[#fbe764]/10 p-3">
-        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#fbe764]">
-          <Sparkles size={13} />
-          Save CasterCycle
-        </div>
-        <p className="mt-1 text-xs font-semibold leading-5 text-white/64">
-          Add it once for faster daily rides.
-        </p>
-      </div>
-
-      <div className="mt-5 grid grid-cols-3 gap-2">
+      <div className="mt-4 grid grid-cols-2 gap-2">
         <button
-          className="inline-flex min-h-12 items-center justify-center gap-1 rounded-md bg-[#fbe764] px-2 text-xs font-black text-[#111923] transition active:scale-[0.98]"
-          onClick={onAdd}
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#a2ff9a] px-3 text-sm font-black text-[#071018] transition active:scale-[0.98]"
+          onClick={() => {
+            haptic("medium");
+            onRoam();
+          }}
         >
-          <Sparkles size={17} />
-          Add
+          <Bike size={17} />
+          Roam
         </button>
         <button
-          className="inline-flex min-h-12 items-center justify-center gap-1 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/15 px-2 text-xs font-black text-white transition active:scale-[0.98]"
-          onClick={onShare}
-        >
-          <Share2 size={17} />
-          Invite
-        </button>
-        <button
-          className="inline-flex min-h-12 items-center justify-center gap-1 rounded-md bg-[#7cf2ff] px-2 text-xs font-black text-[#111923] transition active:scale-[0.98]"
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#fbe764] px-3 text-sm font-black text-[#071018] transition active:scale-[0.98]"
           onClick={() => {
             haptic("medium");
             onStart();
           }}
         >
           <Play size={17} />
-          Ride
+          Dash
+        </button>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <FeatureChip icon={<Zap size={13} />} label="daily" />
+        <FeatureChip icon={<Trophy size={13} />} label="rank" />
+        <FeatureChip icon={<Wallet size={13} />} label="base" />
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <button
+          className="inline-flex min-h-11 items-center justify-center gap-1 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/15 px-2 text-xs font-black text-white transition active:scale-[0.98]"
+          onClick={onShare}
+        >
+          <Share2 size={17} />
+          Invite
+        </button>
+        <button
+          className="inline-flex min-h-11 items-center justify-center gap-1 rounded-md border border-[#fbe764]/45 bg-[#fbe764]/14 px-2 text-xs font-black text-white transition active:scale-[0.98]"
+          onClick={onAdd}
+        >
+          <Sparkles size={17} />
+          Add app
         </button>
       </div>
       <button
@@ -2131,6 +2406,7 @@ function WorldHub({
   bestToday,
   bestAll,
   streak,
+  socialRows,
   proActive,
   dayActive,
   lifetimeActive,
@@ -2147,6 +2423,7 @@ function WorldHub({
   bestToday: number;
   bestAll: number;
   streak: number;
+  socialRows: LeaderboardRow[];
   proActive: boolean;
   dayActive: boolean;
   lifetimeActive: boolean;
@@ -2189,7 +2466,7 @@ function WorldHub({
     <div className="mt-4">
       <div className="flex items-end justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#7cf2ff]">Ride worlds</div>
+          <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#7cf2ff]">Play</div>
           <div className="mt-1 truncate text-xl font-black leading-tight text-white">{selectedRoute.name}</div>
           <div className="mt-1 truncate text-xs font-semibold text-white/54">{selectedRoute.tagline}</div>
         </div>
@@ -2207,9 +2484,10 @@ function WorldHub({
 
       <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2">
         <div className="min-w-0">
-          <div className="text-[9px] font-black uppercase tracking-[0.16em] text-white/42">park access</div>
+          <div className="text-[9px] font-black uppercase tracking-[0.16em] text-white/42">access</div>
           <div className="truncate text-sm font-black text-white">{passLabel}</div>
         </div>
+        <SocialRiderStack rows={socialRows} />
         <button
           className="inline-flex min-h-9 shrink-0 items-center justify-center gap-1 rounded-md border border-[#fbe764]/45 bg-[#fbe764]/14 px-3 text-[11px] font-black text-[#fbe764] active:scale-[0.98]"
           onClick={proActive ? onFreeRide : onShop}
@@ -2228,7 +2506,7 @@ function WorldHub({
               Daily dash
             </div>
             <div className="mt-1 text-sm font-black text-white">Forward score run</div>
-            <div className="mt-1 text-xs font-semibold leading-4 text-white/55">Fast hazards, clean lines, leaderboard score.</div>
+            <div className="mt-1 text-xs font-semibold leading-4 text-white/55">Hazards, charge, leaderboard.</div>
           </div>
           <button
             className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-3 text-xs font-black text-[#111923] active:scale-[0.98]"
@@ -2248,7 +2526,7 @@ function WorldHub({
               Freestyle park
             </div>
             <div className="mt-1 text-sm font-black text-white">Open world ride</div>
-            <div className="mt-1 text-xs font-semibold leading-4 text-white/55">Choose any direction. Free timer, pass unlocks unlimited.</div>
+            <div className="mt-1 text-xs font-semibold leading-4 text-white/55">Open park. Terrain matters.</div>
           </div>
           <button
             className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[#a2ff9a] px-3 text-xs font-black text-[#111923] active:scale-[0.98]"
@@ -2274,8 +2552,12 @@ function WorldHub({
         </button>
       )}
 
-      <div className="relative mt-3 grid gap-2 rounded-md border border-white/10 bg-[#02070c]/42 p-2">
-        <div className="pointer-events-none absolute bottom-8 left-[62px] top-8 w-1 rounded-full bg-white/12" />
+      <div className="mt-3 rounded-md border border-white/10 bg-[#02070c]/42 p-2">
+        <div className="mb-2 flex items-center justify-between gap-2 px-1">
+          <div className="text-[10px] font-black uppercase tracking-[0.16em] text-white/42">route</div>
+          <div className="text-[10px] font-bold text-white/38">choose before Dash</div>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
         {ROUTES.map((route) => {
           const meta = worldMeta[route.area];
           const active = selected === route.area;
@@ -2283,50 +2565,26 @@ function WorldHub({
           return (
             <button
               key={route.area}
-              className={`relative grid min-h-[112px] grid-cols-[112px_1fr] gap-3 rounded-md border p-2 text-left transition active:scale-[0.99] ${
+              className={`min-h-[74px] rounded-md border p-2 text-left transition active:scale-[0.99] ${
                 active ? "border-[#fbe764]/72 bg-[#fbe764]/12" : "border-white/12 bg-white/7"
               }`}
               onClick={() => onSelect(route.area)}
             >
-              <span
-                className="absolute left-[55px] top-1/2 z-10 h-4 w-4 -translate-y-1/2 rounded-full border-2"
-                style={{ background: active ? "#fbe764" : route.accent, borderColor: "#111923" }}
-              />
-              <WorldPreview route={route} active={active} locked={!unlocked} />
-              <span className="flex min-w-0 flex-col justify-between py-1">
-                <span className="min-w-0">
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-black uppercase tracking-[0.16em] text-[#7cf2ff]">{meta.kicker}</span>
-                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-black uppercase ${unlocked ? "bg-[#a2ff9a] text-[#111923]" : "bg-white/10 text-white/58"}`}>
-                      {unlocked ? meta.access : meta.badge}
-                    </span>
-                  </span>
-                  <span className="mt-1 block text-base font-black leading-tight text-white">{route.name}</span>
-                  <span className="mt-1 block text-xs font-semibold leading-4 text-white/56">{meta.feature}</span>
-                </span>
-                <span className="mt-2 flex items-center justify-between gap-2">
-                  <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.08em] text-white/44">
-                    {unlocked ? <CheckCircle2 size={12} /> : <Lock size={12} />}
-                    {unlocked ? (active ? "Selected" : "Tap to select") : meta.lockText}
-                  </span>
-                  {active && <span className="h-2.5 w-2.5 rounded-full bg-[#fbe764]" />}
-                </span>
+              <span className="flex items-center justify-between gap-1">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: route.accent }} />
+                {unlocked ? <CheckCircle2 size={12} className={active ? "text-[#fbe764]" : "text-[#a2ff9a]"} /> : <Lock size={12} className="text-white/46" />}
               </span>
+              <span className="mt-2 block text-xs font-black leading-tight text-white">{route.name.replace("Community ", "")}</span>
+              <span className="mt-1 block truncate text-[9px] font-black uppercase tracking-[0.08em] text-white/42">{unlocked ? (active ? "Selected" : meta.access) : meta.badge}</span>
             </button>
           );
         })}
+        </div>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
+      <div className="mt-3">
         <button
-          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#fbe764] px-4 text-sm font-black text-[#111923] transition active:scale-[0.98]"
-          onClick={onStart}
-        >
-          {phase === "finished" ? <RotateCcw size={18} /> : <Play size={18} />}
-          {phase === "finished" ? "Ride Again" : "Dash Ride"}
-        </button>
-        <button
-          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-4 text-sm font-black text-[#111923] transition active:scale-[0.98] disabled:opacity-70"
+          className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/14 px-4 text-sm font-black text-white transition active:scale-[0.98] disabled:opacity-70"
           disabled={sharing}
           onClick={onShare}
         >
@@ -2335,54 +2593,6 @@ function WorldHub({
         </button>
       </div>
     </div>
-  );
-}
-
-function WorldPreview({ route, active, locked }: { route: RouteTheme; active: boolean; locked: boolean }) {
-  const park = route.area === "park";
-  const statePark = route.area === "statePark";
-
-  return (
-    <span
-      className="relative block h-full min-h-[96px] overflow-hidden rounded-md border"
-      style={{
-        borderColor: active ? route.accent : "rgba(255,255,255,0.14)",
-        background: `linear-gradient(180deg, ${route.skyTop}, ${route.skyBottom})`,
-      }}
-    >
-      <span className="absolute inset-x-0 bottom-0 h-[58%]" style={{ background: park ? "#4c8e48" : statePark ? "#2f6f50" : "#292a72" }} />
-      <span className="absolute left-[45%] top-[10%] h-[108%] w-7 -translate-x-1/2 rotate-[-10deg] rounded-full" style={{ background: route.road }} />
-      <span className="absolute left-[58%] top-[16%] h-[92%] w-5 -translate-x-1/2 rotate-[18deg] rounded-full opacity-70" style={{ background: route.roadEdge }} />
-      <span className="absolute bottom-5 left-4 h-8 w-10 rounded bg-[#3d7d42]">
-        <span className="absolute left-1 top-1 h-2 w-8 rounded bg-[#7cf2ff]/70" />
-        <span className="absolute bottom-1 left-1 h-2 w-8 rounded bg-[#fbe764]/70" />
-      </span>
-      <span className="absolute bottom-8 right-4 h-5 w-9 rounded-full border-2" style={{ borderColor: route.accent }} />
-      {park && (
-        <>
-          <span className="absolute bottom-4 right-7 h-7 w-7 rounded bg-[#cfd7d9] rotate-12" />
-          <span className="absolute bottom-12 left-8 h-5 w-8 rounded border border-white/70" />
-        </>
-      )}
-      {statePark && (
-        <>
-          <span className="absolute bottom-4 left-7 h-10 w-3 rounded-t-full bg-[#16452d]" />
-          <span className="absolute bottom-8 left-4 h-10 w-3 rounded-t-full bg-[#1b5a38]" />
-          <span className="absolute bottom-7 right-8 h-1.5 w-12 rotate-[-12deg] rounded bg-[#b88a4f]" />
-        </>
-      )}
-      {route.area === "bikeLand" && (
-        <>
-          <span className="absolute bottom-5 left-6 h-3 w-12 rounded-full bg-[#ff7adf]/80" />
-          <span className="absolute bottom-12 right-5 h-3 w-11 rounded-full bg-[#7cf2ff]/80" />
-          <span className="absolute right-4 top-5 h-8 w-8 rounded-full border-2 border-[#fbe764]" />
-        </>
-      )}
-      <span className="absolute bottom-8 left-[48%] h-5 w-8 -translate-x-1/2 -rotate-12 rounded-full border-2 border-[#111923] bg-[#fbe764]" />
-      <span className="absolute bottom-6 left-[43%] h-3 w-3 rounded-full border-2 border-[#111923] bg-white" />
-      <span className="absolute bottom-6 left-[56%] h-3 w-3 rounded-full border-2 border-[#111923] bg-white" />
-      {locked && <span className="absolute inset-0 flex items-center justify-center bg-black/42 text-white"><Lock size={24} /></span>}
-    </span>
   );
 }
 
@@ -2499,6 +2709,45 @@ function MissionPanel({
           <div className="h-full rounded-full bg-[#7cf2ff]" style={{ width: `${Math.round(status.progress * 100)}%` }} />
         </div>
         <div className="w-20 text-right text-[10px] font-black uppercase tracking-[0.08em] text-white/70">{status.label}</div>
+      </div>
+    </div>
+  );
+}
+
+function DailyRewardPanel({
+  claimed,
+  onClaim,
+  onShare,
+  onShop,
+}: {
+  claimed: boolean;
+  onClaim: () => void;
+  onShare: () => void;
+  onShop: () => void;
+}) {
+  return (
+    <div className="mt-3 rounded-md border border-[#fbe764]/28 bg-[#fbe764]/10 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#fbe764]">
+            <Sparkles size={13} />
+            Daily reward
+          </div>
+          <div className="mt-1 text-sm font-black text-white">{claimed ? "Badge claimed" : "Claim today's badge"}</div>
+          <div className="mt-0.5 text-xs font-semibold text-white/58">Share for bonus CYCLE. Come back tomorrow.</div>
+        </div>
+        {claimed && <CheckCircle2 size={22} className="shrink-0 text-[#a2ff9a]" />}
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <button className="min-h-10 rounded-md bg-[#fbe764] px-2 text-[10px] font-black uppercase tracking-[0.04em] text-[#071018] disabled:opacity-55" disabled={claimed} onClick={onClaim}>
+          Badge
+        </button>
+        <button className="min-h-10 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/14 px-2 text-[10px] font-black uppercase tracking-[0.04em] text-white" onClick={onShare}>
+          Share CYCLE
+        </button>
+        <button className="min-h-10 rounded-md border border-white/12 bg-white/8 px-2 text-[10px] font-black uppercase tracking-[0.04em] text-white/76" onClick={onShop}>
+          Claim
+        </button>
       </div>
     </div>
   );
@@ -2649,6 +2898,31 @@ function ResultStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+function SocialRiderStack({ rows }: { rows: LeaderboardRow[] }) {
+  const visible = rows.slice(0, 3);
+  if (visible.length === 0) {
+    return (
+      <div className="flex h-9 w-9 items-center justify-center rounded-md border border-white/12 bg-black/24 text-[#7cf2ff]">
+        <Users size={16} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex -space-x-2">
+      {visible.map((row, index) => (
+        <div
+          key={`${row.fid}-${index}`}
+          className="flex h-9 w-9 items-center justify-center rounded-md border-2 border-[#071018] bg-[#101923] bg-cover bg-center text-[10px] font-black text-[#7cf2ff] shadow-lg"
+          style={{ backgroundImage: row.pfpUrl ? `url("${row.pfpUrl}")` : undefined, zIndex: visible.length - index }}
+        >
+          {!row.pfpUrl && (row.username || row.displayName || "R").slice(0, 1).toUpperCase()}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SkinPicker({
   skins,
   selected,
@@ -2702,16 +2976,22 @@ function Leaderboard({
   rows,
   scope,
   period,
+  mode,
   onProfile,
+  onChallenge,
   onScope,
   onPeriod,
+  onMode,
 }: {
   rows: LeaderboardRow[];
   scope: LeaderboardScope;
   period: LeaderboardPeriod;
+  mode: LeaderboardMode;
   onProfile: (fid: number) => void;
+  onChallenge: (row: LeaderboardRow) => void;
   onScope: (scope: LeaderboardScope) => void;
   onPeriod: (period: LeaderboardPeriod) => void;
+  onMode: (mode: LeaderboardMode) => void;
 }) {
   return (
     <div className="mt-4">
@@ -2737,6 +3017,24 @@ function Leaderboard({
         </div>
       </div>
       <div className="mb-2 grid grid-cols-2 gap-2">
+        {(["dash", "freestyle"] as LeaderboardMode[]).map((item) => (
+          <button
+            key={item}
+            className="min-h-8 rounded-md border px-2 text-[10px] font-black uppercase tracking-[0.08em] text-white"
+            style={{
+              borderColor: mode === item ? "rgba(162,255,154,0.72)" : "rgba(255,255,255,0.12)",
+              background: mode === item ? "rgba(162,255,154,0.14)" : "rgba(255,255,255,0.06)",
+            }}
+            onClick={() => {
+              haptic("selection");
+              onMode(item);
+            }}
+          >
+            {item === "dash" ? "dash" : "park"}
+          </button>
+        ))}
+      </div>
+      <div className="mb-2 grid grid-cols-2 gap-2">
         {(["daily", "weekly"] as LeaderboardPeriod[]).map((item) => (
           <button
             key={item}
@@ -2759,12 +3057,21 @@ function Leaderboard({
           <div className="px-3 py-3 text-xs font-semibold text-white/50">No server scores yet. Finish a ride to seed today.</div>
         ) : (
           rows.slice(0, 5).map((row, index) => (
-            <button
+            <div
               key={`${row.fid}-${row.username}-${index}`}
-              className="flex w-full items-center gap-2 border-b border-white/8 px-3 py-2 text-left transition hover:bg-white/5 last:border-b-0"
+              role="button"
+              tabIndex={0}
+              className="flex w-full cursor-pointer items-center gap-2 border-b border-white/8 px-3 py-2 text-left transition hover:bg-white/5 last:border-b-0"
               onClick={() => {
                 haptic("selection");
-                if (row.fid > 0) onProfile(row.fid);
+                onChallenge(row);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  haptic("selection");
+                  onChallenge(row);
+                }
               }}
             >
               <div className="w-5 text-xs font-black text-[#fbe764]">{index + 1}</div>
@@ -2778,6 +3085,17 @@ function Leaderboard({
                 <div className="truncate text-xs font-black text-white">{row.username ? `@${row.username}` : row.displayName || "rider"}</div>
                 <div className="truncate text-[10px] font-bold text-white/45">{period === "weekly" && row.bestDateKey ? `best ${row.bestDateKey.slice(5)} - ` : ""}{row.routeName}</div>
               </div>
+              <button
+                aria-label={`Open ${row.username || row.displayName || "rider"} profile`}
+                className="rounded border border-white/10 bg-white/7 px-2 py-1 text-[9px] font-black uppercase tracking-[0.05em] text-white/62"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  haptic("selection");
+                  if (row.fid > 0) onProfile(row.fid);
+                }}
+              >
+                Profile
+              </button>
               <div className="grid min-w-[92px] grid-cols-2 gap-1 text-right">
                 <div>
                   <div className="text-[8px] font-black uppercase tracking-[0.08em] text-white/38">day</div>
@@ -2788,7 +3106,7 @@ function Leaderboard({
                   <div className="text-xs font-black text-[#fbe764]">{row.weeklyScore.toLocaleString()}</div>
                 </div>
               </div>
-            </button>
+            </div>
           ))
         )}
       </div>
@@ -2938,6 +3256,7 @@ function UpgradePanel({
   isPro,
   dayActive,
   annualActive,
+  urgent,
   onConnect,
   onEthSupport,
   onPassPurchased,
@@ -2947,6 +3266,7 @@ function UpgradePanel({
   isPro: boolean;
   dayActive: boolean;
   annualActive: boolean;
+  urgent: boolean;
   onConnect: () => void;
   onEthSupport: () => void;
   onPassPurchased: (plan: PassPlan) => void;
@@ -3038,8 +3358,10 @@ function UpgradePanel({
             <Crown size={13} />
             Cycle Pass
           </div>
-          <div className="mt-1 text-xl font-black leading-tight text-white">Unlimited park riding</div>
-          <div className="mt-1 text-xs font-semibold leading-4 text-white/64">30 seconds free. Pass unlocks Freestyle, E-Bike Land, Carbon Pro, and the lounge.</div>
+          <div className="mt-1 text-xl font-black leading-tight text-white">{urgent ? "Keep the ride going" : "Unlimited park riding"}</div>
+          <div className="mt-1 text-xs font-semibold leading-4 text-white/64">
+            {urgent ? "Your free session ended. A day pass resumes unlimited Freestyle today." : "30 seconds free. Pass unlocks Freestyle, E-Bike Land, Carbon Pro, and the lounge."}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <button
@@ -3121,6 +3443,49 @@ function UpgradePanel({
   );
 }
 
+function PassHistoryPanel({
+  receipts,
+  dayActive,
+  annualActive,
+  passUntil,
+}: {
+  receipts: PassReceipt[];
+  dayActive: boolean;
+  annualActive: boolean;
+  passUntil: number;
+}) {
+  return (
+    <div className="mt-3 rounded-md border border-white/12 bg-white/7 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/52">
+            <ShieldCheck size={13} />
+            Pass receipt
+          </div>
+          <div className="mt-1 text-sm font-black text-white">
+            {annualActive ? "Lifetime unlocked" : dayActive ? `Day pass ${formatPassExpiry(passUntil)}` : "No active pass"}
+          </div>
+        </div>
+        {(dayActive || annualActive) && <CheckCircle2 size={20} className="text-[#a2ff9a]" />}
+      </div>
+      <div className="mt-2 space-y-1.5">
+        {receipts.length === 0 ? (
+          <div className="rounded-md border border-white/10 bg-black/16 px-2 py-2 text-xs font-semibold text-white/46">Purchases appear here after wallet confirmation.</div>
+        ) : (
+          receipts.slice(0, 3).map((receipt) => (
+            <div key={`${receipt.plan}-${receipt.purchasedAt}`} className="flex items-center justify-between gap-2 rounded-md border border-white/10 bg-black/16 px-2 py-2">
+              <div className="truncate text-xs font-black text-white">{receipt.txLabel}</div>
+              <div className="shrink-0 text-[10px] font-bold uppercase tracking-[0.08em] text-white/44">
+                {receipt.plan === "lifetime" ? "lifetime" : formatPassExpiry(receipt.validUntil)}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function lanePoint(width: number, height: number, lane: number, progress: number) {
   const horizon = height * 0.25;
   const bottom = height - 108;
@@ -3132,9 +3497,9 @@ function lanePoint(width: number, height: number, lane: number, progress: number
 function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height: number, free: FreeRideModel, skin: Skin, unlimited: boolean, now: number) {
   ctx.save();
   const sky = ctx.createLinearGradient(0, 0, 0, height);
-  sky.addColorStop(0, "#70b7e7");
-  sky.addColorStop(0.38, "#8ed47b");
-  sky.addColorStop(1, "#2f744f");
+  sky.addColorStop(0, free.area === "statePark" ? "#5f95be" : "#70b7e7");
+  sky.addColorStop(0.38, free.area === "statePark" ? "#88cfa1" : "#8ed47b");
+  sky.addColorStop(1, free.area === "statePark" ? "#245a42" : "#2f744f");
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, width, height);
 
@@ -3156,10 +3521,10 @@ function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height:
   ctx.font = "900 10px system-ui, sans-serif";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  ctx.fillText(unlimited ? "UNLIMITED FREESTYLE" : `${Math.ceil(free.remaining)}S FREE RIDE`, 30, height * 0.13 + 19);
+  ctx.fillText(unlimited ? (free.area === "statePark" ? "STATE PARK UNLIMITED" : "UNLIMITED FREESTYLE") : `${Math.ceil(free.remaining)}S FREE RIDE`, 30, height * 0.13 + 19);
   ctx.fillStyle = "#ffffff";
   ctx.font = "900 16px system-ui, sans-serif";
-  ctx.fillText(free.zone, 30, height * 0.13 + 39);
+  ctx.fillText(`${free.zone} · ${free.terrain}`, 30, height * 0.13 + 39);
 
   if (free.messageT > 0 && free.message) {
     ctx.save();
@@ -3260,7 +3625,7 @@ function drawFreeRideMiniMap(ctx: CanvasRenderingContext2D, width: number, heigh
 }
 
 function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: FreeRideModel) {
-  ctx.fillStyle = "#69bd68";
+  ctx.fillStyle = free.area === "statePark" ? "#4f9b66" : "#69bd68";
   ctx.fillRect(-1400, -1400, 2800, 2800);
 
   ctx.strokeStyle = "rgba(13,61,50,0.18)";
@@ -3286,6 +3651,34 @@ function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: Free
   ctx.bezierCurveTo(-760, 270, -560, 650, -160, 390);
   ctx.bezierCurveTo(260, 116, 530, 340, 1180, 120);
   ctx.stroke();
+
+  if (free.area === "statePark") {
+    ctx.strokeStyle = "rgba(183,138,79,0.9)";
+    ctx.lineWidth = 18;
+    ctx.lineCap = "round";
+    for (const [x, y, rot] of [
+      [-470, 472, -0.22],
+      [350, 245, 0.18],
+      [870, 222, -0.16],
+    ] as [number, number, number][]) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(rot);
+      ctx.beginPath();
+      ctx.moveTo(-90, 0);
+      ctx.lineTo(90, 0);
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255,0.55)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-70, -10);
+      ctx.lineTo(70, -10);
+      ctx.moveTo(-70, 10);
+      ctx.lineTo(70, 10);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
 
   ctx.strokeStyle = "#314f46";
   ctx.lineWidth = 34;

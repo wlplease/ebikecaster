@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { FARCASTER_SHARE_URL, appUrl, getAccountAssociation } from "@/lib/farcaster-config";
+import { appUrl, getAccountAssociation } from "@/lib/farcaster-config";
 
 export function GET() {
   const accountAssociation = getAccountAssociation();
@@ -30,7 +30,7 @@ export function GET() {
       ogDescription:
         "Free 30-second park rides, unlimited Cycle Pass play, E-Bike Land, and Farcaster challenges.",
       ogImageUrl: appUrl("/media/castercycle-hero.png"),
-      castShareUrl: FARCASTER_SHARE_URL,
+      castShareUrl: appUrl("/"),
     },
   };
 

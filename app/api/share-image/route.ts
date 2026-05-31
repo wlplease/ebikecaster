@@ -7,19 +7,27 @@ function clean(value: string | null, fallback: string, max = 80) {
 }
 
 export async function GET(request: NextRequest) {
+  const mode = clean(request.nextUrl.searchParams.get("mode"), "dash", 16);
   const score = clean(request.nextUrl.searchParams.get("score"), "0", 16);
   const route = clean(request.nextUrl.searchParams.get("route"), "Community Park");
   const user = clean(request.nextUrl.searchParams.get("user"), "CasterCycle rider");
   const skin = clean(request.nextUrl.searchParams.get("skin"), "Signal Yellow");
   const date = clean(request.nextUrl.searchParams.get("date"), "");
   const mission = clean(request.nextUrl.searchParams.get("mission"), "Daily mission live", 60);
+  const invite = mode === "invite";
+  const freestyle = mode === "freestyle";
+  const headline = invite ? "FREE PARK RIDES" : freestyle ? "FREESTYLE PARK SCORE" : "DAILY DASH SCORE";
+  const bigNumber = invite ? "RIDE" : score;
+  const missionText = invite ? "30s free roam. $1 day or $7 lifetime on Base." : mission;
+  const skyStart = freestyle ? "#247a70" : invite ? "#263d7a" : "#1e73b6";
+  const skyMid = freestyle ? "#7bcf74" : invite ? "#35c6b7" : "#80c86a";
 
   const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="1200" height="630" viewBox="0 0 1200 630" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#1e73b6"/>
-      <stop offset="0.46" stop-color="#80c86a"/>
+      <stop offset="0" stop-color="${skyStart}"/>
+      <stop offset="0.46" stop-color="${skyMid}"/>
       <stop offset="1" stop-color="#f5d46b"/>
     </linearGradient>
     <linearGradient id="shade" x1="0" y1="0" x2="1" y2="0">
@@ -59,12 +67,12 @@ export async function GET(request: NextRequest) {
   <g transform="translate(72 95)">
     <text x="0" y="0" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="900" fill="#fbe764" letter-spacing="8">CASTERCYCLE</text>
     <text x="0" y="58" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="900" fill="white" opacity="0.9">${route}</text>
-    <text x="0" y="226" font-family="Arial, Helvetica, sans-serif" font-size="118" font-weight="900" fill="white">${score}</text>
-    <text x="6" y="274" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="900" fill="#fbe764">DAILY RIDE SCORE</text>
+    <text x="0" y="226" font-family="Arial, Helvetica, sans-serif" font-size="${invite ? 104 : 118}" font-weight="900" fill="white">${bigNumber}</text>
+    <text x="6" y="274" font-family="Arial, Helvetica, sans-serif" font-size="26" font-weight="900" fill="#fbe764">${headline}</text>
     <text x="6" y="334" font-family="Arial, Helvetica, sans-serif" font-size="27" font-weight="900" fill="white" opacity="0.86">${user}</text>
     <text x="6" y="381" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800" fill="white" opacity="0.66">Skin: ${skin}</text>
     <rect x="0" y="410" width="545" height="58" rx="14" fill="#071018" opacity="0.68"/>
-    <text x="28" y="447" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="900" fill="#7cf2ff">${mission}</text>
+    <text x="28" y="447" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="900" fill="#7cf2ff">${missionText}</text>
     <text x="6" y="522" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800" fill="white" opacity="0.62">${date}</text>
   </g>
 </svg>`;
