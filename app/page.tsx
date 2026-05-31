@@ -54,7 +54,7 @@ const LIFETIME_SECONDS = 80 * 365 * 24 * 60 * 60;
 
 type RidePhase = "ready" | "riding" | "finished";
 type Lane = -1 | 0 | 1;
-type EntityKind = "bolt" | "cone" | "pothole" | "barrier" | "ramp" | "gate";
+type EntityKind = "bolt" | "battery" | "ring" | "cone" | "pothole" | "barrier" | "ramp" | "gate";
 type LeaderboardScope = "global" | "friends";
 type LeaderboardPeriod = "daily" | "weekly";
 type DashboardTab = "ride" | "shop" | "garage" | "club" | "leaders";
@@ -302,30 +302,40 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-function buildEntities(seed: number) {
-  const random = mulberry32(seed);
+function buildEntities(seed: number, area: RideArea) {
+  const random = mulberry32(seed + (area === "statePark" ? 991 : area === "bikeLand" ? 1777 : 0));
   const entities: Entity[] = [];
   let at = 360;
   let id = 1;
 
   while (at < COURSE_LENGTH - 220) {
-    at += 130 + random() * 115;
+    at += area === "bikeLand" ? 108 + random() * 88 : area === "statePark" ? 132 + random() * 108 : 118 + random() * 112;
     const lane = ([-1, 0, 1] as Lane[])[Math.floor(random() * 3)];
     const roll = random();
 
-    if (roll < 0.3) {
+    if (roll < (area === "park" ? 0.34 : 0.28)) {
       entities.push({ id: id++, kind: "bolt", lane, at });
       if (random() > 0.62) entities.push({ id: id++, kind: "bolt", lane, at: at + 72 });
-    } else if (roll < 0.47) {
+    } else if (roll < (area === "statePark" ? 0.4 : 0.43)) {
+      entities.push({ id: id++, kind: random() > 0.64 ? "battery" : "ring", lane, at });
+    } else if (roll < 0.56) {
       entities.push({ id: id++, kind: "cone", lane, at });
-    } else if (roll < 0.62) {
+    } else if (roll < (area === "statePark" ? 0.72 : 0.66)) {
       entities.push({ id: id++, kind: "pothole", lane, at });
     } else if (roll < 0.78) {
       entities.push({ id: id++, kind: "barrier", lane, at });
-    } else if (roll < 0.91) {
+    } else if (roll < (area === "bikeLand" ? 0.93 : 0.9)) {
       entities.push({ id: id++, kind: "ramp", lane, at });
     } else {
       entities.push({ id: id++, kind: "gate", lane, at });
+    }
+
+    if (Math.floor(at) % 1450 < 150) {
+      const patternLane = ([-1, 0, 1] as Lane[])[Math.floor(random() * 3)];
+      const sideLane = (patternLane === 0 ? (random() > 0.5 ? -1 : 1) : 0) as Lane;
+      entities.push({ id: id++, kind: area === "statePark" ? "battery" : "ring", lane: patternLane, at: at + 58 });
+      entities.push({ id: id++, kind: area === "bikeLand" ? "gate" : "bolt", lane: sideLane, at: at + 128 });
+      if (area !== "statePark") entities.push({ id: id++, kind: "ramp", lane: patternLane, at: at + 210 });
     }
   }
 
@@ -375,7 +385,7 @@ function makeGame(area: RideArea = "park") {
     nearMissVoiceNotified: false,
     hitVoiceNotified: false,
     finalStretchNotified: false,
-    entities: buildEntities(seed),
+    entities: buildEntities(seed, area),
     submitted: false,
   };
 }
@@ -1209,6 +1219,27 @@ export default function CasterCycleApp() {
             }
             haptic("light");
             playSfx("bolt");
+          } else if (entity.kind === "battery" && !entity.collected && laneMatch && rel < 36) {
+            entity.collected = true;
+            current.pickups += 1;
+            current.combo += 1;
+            current.bestCombo = Math.max(current.bestCombo, current.combo);
+            current.battery = clamp(current.battery + 16, 0, 100);
+            current.score += 260 + current.combo * 24;
+            current.boost = Math.max(current.boost, 0.24);
+            rideSignal(current, "FULL CELL", current.route.bolt, 0.05);
+            haptic("success");
+            playSfx("clear");
+          } else if (entity.kind === "ring" && !entity.hit && laneMatch && rel < 40) {
+            entity.hit = true;
+            current.boosts += 1;
+            current.combo += 2;
+            current.bestCombo = Math.max(current.bestCombo, current.combo);
+            current.boost = Math.max(current.boost, current.route.area === "bikeLand" ? 0.95 : 0.68);
+            current.score += 390 + current.combo * 32;
+            rideSignal(current, current.route.area === "statePark" ? "TRAIL FLOW" : "FLOW RING", current.route.roadEdge, 0.09);
+            haptic("medium");
+            playSfx("boost");
           } else if (entity.kind === "ramp" && !entity.hit && laneMatch && rel < 36) {
             entity.hit = true;
             current.boosts += 1;
@@ -1233,7 +1264,7 @@ export default function CasterCycleApp() {
             haptic("medium");
             playSfx("boost");
             if (current.boosts === 3) playVoice("boost", { route: current.route.name });
-          } else if (entity.kind !== "bolt" && entity.kind !== "ramp" && entity.kind !== "gate" && !entity.hit && rel < 22) {
+          } else if (entity.kind !== "bolt" && entity.kind !== "battery" && entity.kind !== "ring" && entity.kind !== "ramp" && entity.kind !== "gate" && !entity.hit && rel < 22) {
             entity.hit = true;
             if (laneMatch && current.airborne <= 0.35) {
               current.hits += 1;
@@ -2901,6 +2932,94 @@ function drawParkLandmarks(ctx: CanvasRenderingContext2D, width: number, height:
       ctx.restore();
     }
   }
+
+  drawLandForeground(ctx, width, height, game, now);
+}
+
+function drawLandForeground(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel, now: number) {
+  const horizon = height * 0.25;
+  const statePark = game.route.area === "statePark";
+  const bikeLand = game.route.area === "bikeLand";
+  const palette = bikeLand
+    ? ["#ff7adf", "#7cf2ff", "#fbe764"]
+    : statePark
+      ? ["#9ff28a", "#7cf2ff", "#fbe764"]
+      : ["#fbe764", "#7cf2ff", "#a2ff9a"];
+
+  ctx.save();
+  for (const side of [-1, 1]) {
+    for (let i = 0; i < 7; i += 1) {
+      const loop = (i * 245 - (game.distance * (bikeLand ? 1.02 : 0.82)) % 245 + 245) % 245;
+      const p = loop / 245;
+      if (p < 0.08) continue;
+      const y = horizon + p * (height - horizon + 80);
+      const scale = 0.32 + p * 1.55;
+      const x = width / 2 + side * (width * (0.3 + p * 0.46));
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+      ctx.globalAlpha = clamp(0.25 + p * 0.72, 0.22, 0.95);
+
+      if (bikeLand) {
+        ctx.strokeStyle = palette[i % palette.length];
+        ctx.lineWidth = 3;
+        ctx.shadowColor = ctx.strokeStyle;
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.arc(0, -16, 22, Math.PI, 0);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "rgba(17,25,35,0.82)";
+        roundRect(ctx, -28, 2, 56, 20, 6);
+        ctx.fill();
+      } else if (statePark) {
+        ctx.fillStyle = i % 2 === 0 ? "rgba(22,82,52,0.95)" : "rgba(31,106,66,0.86)";
+        ctx.beginPath();
+        ctx.moveTo(0, -48);
+        ctx.lineTo(-22, 8);
+        ctx.lineTo(22, 8);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "rgba(92,65,39,0.95)";
+        ctx.fillRect(-4, 8, 8, 24);
+        if (i % 3 === 0) {
+          ctx.strokeStyle = "rgba(183,138,79,0.88)";
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(side * -24, 22);
+          ctx.lineTo(side * 24, 8);
+          ctx.stroke();
+        }
+      } else {
+        ctx.fillStyle = i % 2 === 0 ? "rgba(36,85,68,0.9)" : "rgba(44,103,83,0.86)";
+        roundRect(ctx, -30, 2, 60, 18, 5);
+        ctx.fill();
+        ctx.strokeStyle = palette[i % palette.length];
+        ctx.lineWidth = 2;
+        ctx.strokeRect(-22, -24, 44, 26);
+        ctx.beginPath();
+        ctx.arc(0, -11, 7, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  if (game.phase === "riding") {
+    const pulse = 0.5 + Math.sin(now / 220) * 0.5;
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < 10; i += 1) {
+      const p = ((i * 73 + game.distance * 0.08) % 600) / 600;
+      const x = width * (0.1 + ((i * 37) % 80) / 100);
+      const y = horizon + p * (height - horizon);
+      ctx.globalAlpha = 0.08 + pulse * 0.08;
+      ctx.fillStyle = palette[i % palette.length];
+      ctx.beginPath();
+      ctx.arc(x, y, 1.6 + p * 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
 }
 
 function drawBikeLandFeature(ctx: CanvasRenderingContext2D, label: string, accent: string) {
@@ -3217,6 +3336,8 @@ function drawApproachWarnings(ctx: CanvasRenderingContext2D, width: number, heig
     .map((entity) => ({ entity, rel: entity.at - game.distance }))
     .filter(({ entity, rel }) =>
       entity.kind !== "bolt" &&
+      entity.kind !== "battery" &&
+      entity.kind !== "ring" &&
       entity.kind !== "ramp" &&
       entity.kind !== "gate" &&
       !entity.hit &&
@@ -3304,6 +3425,38 @@ function drawEntity(ctx: CanvasRenderingContext2D, width: number, height: number
     ctx.lineTo(-3, -1);
     ctx.closePath();
     ctx.fill();
+  } else if (entity.kind === "battery") {
+    ctx.fillStyle = route.bolt;
+    ctx.shadowColor = route.bolt;
+    ctx.shadowBlur = 16;
+    roundRect(ctx, -20, -22, 40, 34, 7);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(17,25,35,0.9)";
+    roundRect(ctx, -14, -15, 28, 20, 4);
+    ctx.fill();
+    ctx.fillStyle = "#a2ff9a";
+    ctx.fillRect(-9, -10, 18, 10);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "900 17px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("+", 0, -3);
+  } else if (entity.kind === "ring") {
+    const pulse = 0.5 + Math.sin(now / 120 + entity.id) * 0.5;
+    ctx.strokeStyle = route.roadEdge;
+    ctx.shadowColor = route.roadEdge;
+    ctx.shadowBlur = 18;
+    ctx.lineWidth = 7;
+    ctx.beginPath();
+    ctx.ellipse(0, -8, 34 + pulse * 4, 46 + pulse * 5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = route.bolt;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(0, -8, 22, 31, 0, 0, Math.PI * 2);
+    ctx.stroke();
   } else if (entity.kind === "ramp") {
     ctx.fillStyle = "#4ade80";
     ctx.beginPath();
