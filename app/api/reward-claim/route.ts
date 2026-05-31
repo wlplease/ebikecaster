@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@farcaster/quick-auth";
-import { FieldValue } from "firebase-admin/firestore";
 import { keccak256, toBytes } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { z } from "zod";
-import { getAdminDb } from "@/lib/firebase-admin";
+import { firebaseRestConfigured, getDoc, setDoc } from "@/lib/firebase-rest";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -102,21 +101,22 @@ export async function POST(request: NextRequest) {
   if (auth.address && auth.address !== to) return json({ error: "Wallet does not match authenticated user." }, 403);
 
   try {
-    const db = getAdminDb();
-    const scoreRef = db.collection("castercycle-scores").doc(`${parsed.data.dateKey}:${auth.fid}`);
+    if (!firebaseRestConfigured()) {
+      return json({ ok: false, configured: false, error: "Firebase client config is not set." }, 202);
+    }
+
     const claimId = keccak256(toBytes(`castercycle:${parsed.data.kind}:${parsed.data.dateKey}:${auth.fid}`));
-    const claimRef = db.collection("castercycle-reward-claims").doc(claimId);
-    const existing = await claimRef.get();
-    const existingClaim = existing.data()?.claim as { deadline?: number } | undefined;
+    const existing = await getDoc("castercycle-reward-claims", claimId);
+    const existingClaim = existing?.data?.claim as { deadline?: number } | undefined;
     const now = Math.floor(Date.now() / 1000);
     if (existingClaim?.deadline && existingClaim.deadline > now + 30) {
       return json({ ok: true, claim: existingClaim, existing: true });
     }
 
-    const scoreSnap = await scoreRef.get();
-    if (!scoreSnap.exists) return json({ error: "Finish a verified ride before claiming credits." }, 404);
+    const scoreSnap = await getDoc("castercycle-scores", `${parsed.data.dateKey}:${auth.fid}`);
+    if (!scoreSnap) return json({ error: "Finish a verified ride before claiming credits." }, 404);
 
-    const scoreData = scoreSnap.data() || {};
+    const scoreData = scoreSnap.data || {};
     const amount = rewardAmount(scoreData, parsed.data.kind);
     const score = Number(scoreData.score || 0);
     const dateKeyHash = keccak256(toBytes(parsed.data.dateKey));
@@ -157,14 +157,15 @@ export async function POST(request: NextRequest) {
       label: parsed.data.kind === "share" ? "Share bonus" : "Ride credits",
     };
 
-    await claimRef.set({
+    const nowMs = Date.now();
+    await setDoc("castercycle-reward-claims", claimId, {
       fid: auth.fid,
       dateKey: parsed.data.dateKey,
       kind: parsed.data.kind,
       address: to,
       claim,
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
+      createdAtMs: Number(existing?.data?.createdAtMs || nowMs),
+      updatedAtMs: nowMs,
     });
 
     return json({ ok: true, claim });

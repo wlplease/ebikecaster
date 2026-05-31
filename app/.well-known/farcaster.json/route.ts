@@ -14,9 +14,9 @@ export function GET() {
       buttonTitle: "Ride CasterCycle",
       splashImageUrl: appUrl("/media/castercycle.png"),
       splashBackgroundColor: "#101b26",
-      subtitle: "Daily e-bike score run",
+      subtitle: "Freestyle park rides",
       description:
-        "Ride a daily forward-scrolling e-bike route, dodge street hazards, collect charge, unlock skins, and share the score to beat.",
+        "Freestyle Community Park, unlock State Park and E-Bike Land, customize bikes, join the paid club, and share scores.",
       screenshotUrls: [
         appUrl("/media/castercycle-screenshot-ready.png"),
         appUrl("/media/castercycle-screenshot-ride.png"),
@@ -25,10 +25,10 @@ export function GET() {
       primaryCategory: "games",
       tags: ["game", "ebike", "daily", "farcaster", "base"],
       heroImageUrl: appUrl("/media/castercycle-hero.png"),
-      tagline: "Daily e-bike dash.",
+      tagline: "Park e-bike dash.",
       ogTitle: "CasterCycle",
       ogDescription:
-        "One daily e-bike route. Ride, score, unlock skins, and challenge Farcaster friends.",
+        "Ride park paths, unlock paid bike worlds, customize bikes, and challenge Farcaster friends.",
       ogImageUrl: appUrl("/media/castercycle-hero.png"),
       castShareUrl: FARCASTER_SHARE_URL,
     },

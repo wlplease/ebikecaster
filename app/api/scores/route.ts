@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@farcaster/quick-auth";
-import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
-import { getAdminDb } from "@/lib/firebase-admin";
+import { firebaseRestConfigured, getDoc, queryDocs, setDoc } from "@/lib/firebase-rest";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
 const ETH_ADDRESS_REGEX = /^0x[0-9a-f]{40}$/i;
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
-const ROUTE_NAMES = ["Neon Bike Lane", "Solar Pier", "Market Loop", "Rainline Express", "Hilltop Circuit"];
+const ROUTE_NAMES = ["Community Park", "State Park", "E-Bike Land"];
 
 const scoreSchema = z.object({
   dateKey: z.string().regex(DATE_REGEX),
@@ -42,15 +41,6 @@ function requestIp(request: NextRequest) {
   return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
 }
 
-function dateSeed(key: string) {
-  let hash = 2166136261;
-  for (const char of key) {
-    hash ^= char.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
 function utcDateKey(offsetDays = 0) {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() + offsetDays);
@@ -64,7 +54,7 @@ function weekKeyFromDateKey(dateKey: string) {
   date.setUTCDate(date.getUTCDate() + 4 - dayNumber);
   const weekYear = date.getUTCFullYear();
   const yearStart = new Date(Date.UTC(weekYear, 0, 1));
-  const week = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  const week = Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
   return `${weekYear}-W${String(week).padStart(2, "0")}`;
 }
 
@@ -72,8 +62,8 @@ function validDateKey(dateKey: string) {
   return [utcDateKey(-1), utcDateKey(0), utcDateKey(1)].includes(dateKey);
 }
 
-function expectedRoute(dateKey: string) {
-  return ROUTE_NAMES[dateSeed(dateKey) % ROUTE_NAMES.length];
+function expectedRoute(routeName: string) {
+  return ROUTE_NAMES.includes(routeName);
 }
 
 function plausibleScore(payload: z.infer<typeof scoreSchema>) {
@@ -147,20 +137,21 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const db = getAdminDb();
+    if (!firebaseRestConfigured()) return json({ ok: false, rows: [], configured: false });
     const weekKey = weekKeyFromDateKey(dateKey);
     const collection = period === "weekly" ? "castercycle-weekly-scores" : "castercycle-scores";
     const keyField = period === "weekly" ? "weekKey" : "dateKey";
     const keyValue = period === "weekly" ? weekKey : dateKey;
-    const snap = await db
-      .collection(collection)
-      .where(keyField, "==", keyValue)
-      .orderBy("score", "desc")
-      .limit(scope === "friends" ? 100 : 25)
-      .get();
+    const snap = await queryDocs({
+      collection,
+      whereField: keyField,
+      whereValue: keyValue,
+      orderField: "score",
+      limit: scope === "friends" ? 100 : 25,
+    });
 
-    let rows = snap.docs.map((doc) => {
-      const data = doc.data();
+    let rows = snap.map((doc) => {
+      const data = doc.data;
       return {
         fid: Number(data.fid || 0),
         username: String(data.username || ""),
@@ -177,17 +168,19 @@ export async function GET(request: NextRequest) {
 
     if (scope === "friends") {
       const fids = await followingFids(fid);
-      if (fids) rows = rows.filter((row) => fids.has(row.fid)).slice(0, 25);
+      rows = fids ? rows.filter((row) => fids.has(row.fid)).slice(0, 25) : rows.slice(0, 25);
     }
 
-    const counterRefs = rows.map((row) =>
-      db.collection(period === "weekly" ? "castercycle-scores" : "castercycle-weekly-scores").doc(
-        period === "weekly" ? `${dateKey}:${row.fid}` : `${weekKey}:${row.fid}`,
+    const counterDocs = await Promise.all(
+      rows.map((row) =>
+        getDoc(
+          period === "weekly" ? "castercycle-scores" : "castercycle-weekly-scores",
+          period === "weekly" ? `${dateKey}:${row.fid}` : `${weekKey}:${row.fid}`,
+        ),
       ),
     );
-    const counterDocs = await Promise.all(counterRefs.map((ref) => ref.get()));
     rows = rows.map((row, index) => {
-      const score = Number(counterDocs[index].data()?.score || 0);
+      const score = Number(counterDocs[index]?.data?.score || 0);
       return period === "weekly" ? { ...row, dailyScore: score } : { ...row, weeklyScore: score };
     });
 
@@ -210,7 +203,7 @@ export async function POST(request: NextRequest) {
   const verifiedFid = auth?.fid && auth.fid > 0 ? auth.fid : 0;
   if (!verifiedFid) return json({ error: "Farcaster authentication required." }, 401);
   if (!validDateKey(payload.dateKey)) return json({ error: "Score date is not active." }, 400);
-  if (payload.routeName !== expectedRoute(payload.dateKey)) return json({ error: "Route mismatch." }, 400);
+  if (!expectedRoute(payload.routeName)) return json({ error: "Route mismatch." }, 400);
   if (!plausibleScore(payload)) return json({ error: "Score failed validation." }, 400);
 
   const fid = verifiedFid;
@@ -221,33 +214,37 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const db = getAdminDb();
+    if (!firebaseRestConfigured()) return json({ ok: false, configured: false }, 202);
     const docId = `${payload.dateKey}:${fid}`;
     const weekKey = weekKeyFromDateKey(payload.dateKey);
-    const ref = db.collection("castercycle-scores").doc(docId);
-    const weeklyRef = db.collection("castercycle-weekly-scores").doc(`${weekKey}:${fid}`);
-    await db.runTransaction(async (txn) => {
-      const existing = await txn.get(ref);
-      const existingWeekly = await txn.get(weeklyRef);
-      const previousScore = existing.exists ? Number(existing.data()?.score || 0) : 0;
-      const previousWeeklyScore = existingWeekly.exists ? Number(existingWeekly.data()?.score || 0) : 0;
-      const profile = {
-        fid,
-        username: payload.username,
-        displayName: payload.displayName,
-        pfpUrl: payload.pfpUrl,
-        address,
-        verified: !!verifiedFid,
-      };
+    const weeklyId = `${weekKey}:${fid}`;
+    const [existing, existingWeekly] = await Promise.all([
+      getDoc("castercycle-scores", docId),
+      getDoc("castercycle-weekly-scores", weeklyId),
+    ]);
+    const previousScore = Number(existing?.data?.score || 0);
+    const previousWeeklyScore = Number(existingWeekly?.data?.score || 0);
+    const now = Date.now();
+    const profile = {
+      fid,
+      username: payload.username,
+      displayName: payload.displayName,
+      pfpUrl: payload.pfpUrl,
+      address,
+      verified: !!verifiedFid,
+    };
 
-      if (!existing.exists || previousScore <= payload.score) txn.set(ref, {
+    if (!existing || previousScore <= payload.score) {
+      await setDoc("castercycle-scores", docId, {
         ...payload,
         ...profile,
-        updatedAt: FieldValue.serverTimestamp(),
-        createdAt: existing.exists ? existing.data()?.createdAt || FieldValue.serverTimestamp() : FieldValue.serverTimestamp(),
-      }, { merge: true });
+        updatedAtMs: now,
+        createdAtMs: Number(existing?.data?.createdAtMs || now),
+      });
+    }
 
-      if (!existingWeekly.exists || previousWeeklyScore <= payload.score) txn.set(weeklyRef, {
+    if (!existingWeekly || previousWeeklyScore <= payload.score) {
+      await setDoc("castercycle-weekly-scores", weeklyId, {
         ...profile,
         weekKey,
         score: payload.score,
@@ -260,10 +257,10 @@ export async function POST(request: NextRequest) {
         nearMisses: payload.nearMisses,
         battery: payload.battery,
         distance: payload.distance,
-        updatedAt: FieldValue.serverTimestamp(),
-        createdAt: existingWeekly.exists ? existingWeekly.data()?.createdAt || FieldValue.serverTimestamp() : FieldValue.serverTimestamp(),
-      }, { merge: true });
-    });
+        updatedAtMs: now,
+        createdAtMs: Number(existingWeekly?.data?.createdAtMs || now),
+      });
+    }
 
     return json({ ok: true, verified: !!verifiedFid, weekKey });
   } catch {

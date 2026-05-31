@@ -30,7 +30,7 @@ const miniAppMetadata = {
 export const metadata: Metadata = {
   title: "CasterCycle",
   description:
-    "Ride today's forward-scrolling e-bike route, post your score, and challenge Farcaster friends.",
+    "Ride freestyle e-bike parks, unlock paid bike worlds, post scores, and challenge Farcaster friends.",
   manifest: "/manifest.json",
   icons: {
     icon: "/media/castercycle.png",
@@ -40,7 +40,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "CasterCycle",
     description:
-      "One daily e-bike route. Grab charge, clear hazards, and share the score to beat.",
+      "Freestyle e-bike parks, paid bike worlds, clean club chat, and Farcaster scores.",
     url: APP_URL,
     images: [{ url: appUrl("/media/castercycle-hero.png"), width: 1200, height: 630 }],
   },

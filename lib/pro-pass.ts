@@ -3,7 +3,7 @@ export const TREASURY_ADDRESS =
   (process.env.NEXT_PUBLIC_TREASURY_ADDRESS || "0x76bC75Ef2F1f0F25e078641910D8E23A430204F5") as `0x${string}`;
 
 export const USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as `0x${string}`;
-export const WEEKLY_PRICE = 1_000_000;
+export const WEEKLY_PRICE = 990_000;
 export const YEARLY_PRICE = 7_000_000;
 export const ETH_SUPPORT_AMOUNT = "0.0003";
 
@@ -32,6 +32,7 @@ export function formatPassExpiry(timestamp: number): string {
   const now = Math.floor(Date.now() / 1000);
   const diff = timestamp - now;
   if (diff <= 0) return "Cycle Pass";
+  if (diff > 5 * 365 * 86400) return "Lifetime Pass";
   const days = Math.floor(diff / 86400);
   const hours = Math.floor((diff % 86400) / 3600);
   if (days > 0) return `Pass ${days}d ${hours}h`;

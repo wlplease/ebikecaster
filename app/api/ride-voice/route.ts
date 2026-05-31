@@ -60,7 +60,7 @@ function voiceLine(line: LineId, request: NextRequest) {
   if (line === "boost") return "Boost chain. Keep it clean.";
   if (line === "mission") return `${mission} cleared. Nice ride.`;
   if (line === "finish") return "Ride complete. Share the score and make the feed chase you.";
-  if (line === "legal") return "Cycle Pass payments go directly to the treasury on Base. CYCLE credits are gameplay rewards, non-transferable, and have no cash value.";
+  if (line === "legal") return "State Park and E-Bike Land pass payments go directly to the treasury on Base. CYCLE credits are gameplay rewards, non-transferable, and have no cash value.";
   if (line === "lowBattery") return "Low charge. Collect bolts or keep the line clean.";
   if (line === "checkpoint") return "Halfway marker. Hold the flow and bring it home.";
   if (line === "combo") return "Ten flow. You are locked into the lane.";

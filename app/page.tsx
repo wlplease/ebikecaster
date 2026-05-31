@@ -50,14 +50,15 @@ const COURSE_LENGTH = 11800;
 const VIEW_DISTANCE = 1280;
 const STORAGE_PREFIX = "castercycle";
 const WEEK_SECONDS = 7 * 24 * 60 * 60;
-const YEAR_SECONDS = 365 * 24 * 60 * 60;
+const LIFETIME_SECONDS = 80 * 365 * 24 * 60 * 60;
 
 type RidePhase = "ready" | "riding" | "finished";
 type Lane = -1 | 0 | 1;
 type EntityKind = "bolt" | "cone" | "pothole" | "barrier" | "ramp" | "gate";
 type LeaderboardScope = "global" | "friends";
 type LeaderboardPeriod = "daily" | "weekly";
-type DashboardTab = "ride" | "base" | "garage" | "leaders";
+type DashboardTab = "ride" | "shop" | "garage" | "club" | "leaders";
+type RideArea = "park" | "statePark" | "bikeLand";
 type MissionKind = "combo" | "clean" | "boosts" | "battery" | "bolts";
 type SfxId = "start" | "lane" | "bolt" | "boost" | "hit" | "clear" | "finish" | "warning" | "near" | "combo";
 type VoiceLineId =
@@ -79,6 +80,7 @@ type HapticKind = "selection" | "light" | "medium" | "heavy" | "success" | "warn
 type RouteTheme = {
   name: string;
   tagline: string;
+  area: RideArea;
   skyTop: string;
   skyBottom: string;
   road: string;
@@ -197,66 +199,55 @@ type LeaderboardRow = {
   skin: string;
 };
 
+type LoungeMessage = {
+  id: string;
+  fid: number;
+  username: string;
+  displayName: string;
+  pfpUrl: string;
+  text: string;
+  createdAt: number;
+};
+
 const ROUTES: RouteTheme[] = [
   {
-    name: "Neon Bike Lane",
-    tagline: "thread the signal lights",
-    skyTop: "#18224f",
-    skyBottom: "#24b7a7",
-    road: "#172033",
-    roadEdge: "#53f3c4",
-    accent: "#ffcc45",
-    bolt: "#f9e85b",
+    name: "Community Park",
+    tagline: "freestyle paths, courts, fields",
+    area: "park",
+    skyTop: "#4f9bd5",
+    skyBottom: "#b9e86f",
+    road: "#335244",
+    roadEdge: "#9ff28a",
+    accent: "#f5d04c",
+    bolt: "#f8ee64",
     hazard: "#ff5d73",
-    curb: "#f7fbff",
+    curb: "#edf8e4",
   },
   {
-    name: "Solar Pier",
-    tagline: "coast above the morning water",
-    skyTop: "#3e85c5",
-    skyBottom: "#f5c75c",
-    road: "#28445f",
-    roadEdge: "#a2ff9a",
-    accent: "#ff6d4a",
-    bolt: "#fff06a",
-    hazard: "#e14d5b",
-    curb: "#e7f7ff",
-  },
-  {
-    name: "Market Loop",
-    tagline: "squeeze past carts and crosswalks",
-    skyTop: "#5a4bb0",
-    skyBottom: "#f0846d",
-    road: "#263449",
+    name: "State Park",
+    tagline: "premium forest paths and streams",
+    area: "statePark",
+    skyTop: "#2d6f8f",
+    skyBottom: "#d7e78a",
+    road: "#30493e",
     roadEdge: "#7cf2ff",
-    accent: "#ffd166",
-    bolt: "#ffe45e",
-    hazard: "#ff6b6b",
-    curb: "#ffffff",
-  },
-  {
-    name: "Rainline Express",
-    tagline: "ride clean through slick streets",
-    skyTop: "#274b6d",
-    skyBottom: "#8fd6d0",
-    road: "#21333d",
-    roadEdge: "#b4f06d",
-    accent: "#f7b267",
+    accent: "#ffca5f",
     bolt: "#fff275",
     hazard: "#f25f5c",
-    curb: "#d7f8ff",
+    curb: "#f3fff5",
   },
   {
-    name: "Hilltop Circuit",
-    tagline: "climb, boost, and float the downhill",
-    skyTop: "#206a8a",
-    skyBottom: "#c8e17a",
-    road: "#31423f",
-    roadEdge: "#67e8f9",
-    accent: "#ffb703",
-    bolt: "#fef45d",
-    hazard: "#fb4d3d",
-    curb: "#f3fff5",
+    name: "E-Bike Land",
+    tagline: "premium pump tracks and glow paths",
+    area: "bikeLand",
+    skyTop: "#372064",
+    skyBottom: "#35c6b7",
+    road: "#252b55",
+    roadEdge: "#ff7adf",
+    accent: "#7cf2ff",
+    bolt: "#fbe764",
+    hazard: "#ff5d73",
+    curb: "#f7fbff",
   },
 ];
 
@@ -266,6 +257,8 @@ const SKINS: Skin[] = [
   { id: "sunset", name: "Sunset Dash", frame: "#ff6d4a", battery: "#ffe45e", trail: "#ffb703", unlock: "score", label: "5k score" },
   { id: "spark", name: "Base Spark", frame: "#0052ff", battery: "#fbe764", trail: "#7cf2ff", unlock: "supporter", label: "ETH support" },
   { id: "carbon", name: "Carbon Pro", frame: "#f7fbff", battery: "#c4b5fd", trail: "#c4b5fd", unlock: "pro", label: "Cycle Pass" },
+  { id: "forest", name: "Forest Cruiser", frame: "#9ff28a", battery: "#fbe764", trail: "#9ff28a", unlock: "pro", label: "State Park" },
+  { id: "neon", name: "Glow Track", frame: "#ff7adf", battery: "#7cf2ff", trail: "#ff7adf", unlock: "pro", label: "E-Bike Land" },
 ];
 
 const DAILY_MISSIONS: DailyMission[] = [
@@ -343,13 +336,17 @@ function dailyMission(seed: number) {
   return DAILY_MISSIONS[Math.floor((seed / ROUTES.length) % DAILY_MISSIONS.length)];
 }
 
-function makeGame() {
+function routeForArea(area: RideArea) {
+  return ROUTES.find((route) => route.area === area) ?? ROUTES[0];
+}
+
+function makeGame(area: RideArea = "park") {
   const dateKey = localDateKey();
   const seed = dateSeed(dateKey);
   return {
     phase: "ready" as RidePhase,
     dateKey,
-    route: ROUTES[seed % ROUTES.length],
+    route: routeForArea(area),
     mission: dailyMission(seed),
     seed,
     distance: 0,
@@ -511,6 +508,7 @@ export default function CasterCycleApp() {
   const [leaderboardScope, setLeaderboardScope] = useState<LeaderboardScope>("global");
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<LeaderboardPeriod>("daily");
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>("ride");
+  const [rideArea, setRideArea] = useState<RideArea>("park");
   const [ethSupporter, setEthSupporter] = useState(false);
   const [weeklyUntil, setWeeklyUntil] = useState(0);
   const [annualUntil, setAnnualUntil] = useState(0);
@@ -552,10 +550,18 @@ export default function CasterCycleApp() {
       const savedSkin = localStorage.getItem(`${STORAGE_PREFIX}:skin`);
       if (savedSkin && SKINS.some((item) => item.id === savedSkin)) setSelectedSkin(savedSkin);
       setEthSupporter(localStorage.getItem(`${STORAGE_PREFIX}:ethSupporter`) === "1");
-      setWeeklyUntil(Number(localStorage.getItem(`${STORAGE_PREFIX}:weeklyUntil`) || "0"));
-      setAnnualUntil(Number(localStorage.getItem(`${STORAGE_PREFIX}:annualUntil`) || "0"));
+      const savedWeeklyUntil = Number(localStorage.getItem(`${STORAGE_PREFIX}:weeklyUntil`) || "0");
+      const savedAnnualUntil = Number(localStorage.getItem(`${STORAGE_PREFIX}:annualUntil`) || "0");
+      const savedPassActive = Math.max(savedWeeklyUntil, savedAnnualUntil) > Math.floor(Date.now() / 1000);
+      setWeeklyUntil(savedWeeklyUntil);
+      setAnnualUntil(savedAnnualUntil);
       setAudioEnabled(localStorage.getItem(`${STORAGE_PREFIX}:audio`) === "1");
       setVoiceEnabled(localStorage.getItem(`${STORAGE_PREFIX}:voice`) === "1");
+      const savedArea = localStorage.getItem(`${STORAGE_PREFIX}:rideArea`);
+      if (savedArea === "park" || ((savedArea === "statePark" || savedArea === "bikeLand") && savedPassActive)) {
+        setRideArea(savedArea);
+        gameRef.current = makeGame(savedArea);
+      }
       const introSeen = localStorage.getItem(`${STORAGE_PREFIX}:introSeen`) === "1";
       setShowIntro(!introSeen);
       setShowWelcomeBack(introSeen);
@@ -841,11 +847,11 @@ export default function CasterCycleApp() {
   }, [playSfx, playVoice, publishStats, stopMotor, submitScore, syncHud]);
 
   const resetRide = useCallback(() => {
-    gameRef.current = makeGame();
+    gameRef.current = makeGame(rideArea);
     loadStats(gameRef.current.dateKey);
     syncHud();
     haptic("selection");
-  }, [loadStats, syncHud]);
+  }, [loadStats, rideArea, syncHud]);
 
   const startRide = useCallback(() => {
     if (gameRef.current.phase === "finished") {
@@ -940,8 +946,9 @@ export default function CasterCycleApp() {
   }, [boostOrHop, changeLane]);
 
   const shareCast = useCallback(async (text: string, embeds: [] | [string] | [string, string], copiedText = "Share copied") => {
+    const finalText = text.trimEnd().endsWith(SHARE_URL) ? text.trimEnd() : `${text.trimEnd()}\n${SHARE_URL}`;
     try {
-      await sdk.actions.composeCast({ text, embeds });
+      await sdk.actions.composeCast({ text: finalText, embeds });
       setToast("Cast composer opened");
       haptic("success");
       return;
@@ -949,14 +956,14 @@ export default function CasterCycleApp() {
 
     try {
       if (navigator.share) {
-        await navigator.share({ title: "CasterCycle", text, url: SHARE_URL });
+        await navigator.share({ title: "CasterCycle", text: finalText, url: SHARE_URL });
         setToast("Share sheet opened");
         return;
       }
     } catch {}
 
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(finalText);
       setToast(copiedText);
     } catch {
       try {
@@ -970,7 +977,7 @@ export default function CasterCycleApp() {
 
   const shareApp = useCallback(async () => {
     const current = gameRef.current;
-    const castText = `I'm riding today's ${current.route.name} in CasterCycle.\n\nDaily e-bike score run, Farcaster leaderboard, and Base credits:\n${SHARE_URL}`;
+    const castText = `I'm riding ${current.route.name} in CasterCycle.\n\nFree park rides, daily scores, friend leaderboards, and Base unlocks:\n${SHARE_URL}`;
     setSharing(true);
     try {
       await shareCast(castText, [`${APP_URL}/media/castercycle-card.png`, SHARE_URL], "Invite copied");
@@ -984,7 +991,7 @@ export default function CasterCycleApp() {
     const mission = missionStatus(current);
     const missionText = mission.done ? `\nDaily mission cleared: ${current.mission.title}.` : "";
     const shareImageUrl = `${APP_URL}/api/share-image?score=${current.score}&route=${encodeURIComponent(current.route.name)}&user=${encodeURIComponent(displayName)}&skin=${encodeURIComponent(skin.name)}&date=${current.dateKey}&mission=${encodeURIComponent(mission.done ? `${current.mission.title} cleared` : current.mission.goal)}`;
-    const castText = `I scored ${current.score.toLocaleString()} on today's ${current.route.name} in CasterCycle.${missionText}\n\n${current.pickups} charge bolts, ${current.boosts} boosts, ${Math.round(current.battery)}% battery left. Beat my ride:\n${SHARE_URL}`;
+    const castText = `I scored ${current.score.toLocaleString()} in CasterCycle's ${current.route.name}.${missionText}\n\n${current.pickups} charge bolts, ${current.boosts} boosts, ${Math.round(current.battery)}% battery left. Beat my park ride:\n${SHARE_URL}`;
     setSharing(true);
     try {
       await shareCast(castText, [shareImageUrl, SHARE_URL], "Ride copied");
@@ -1007,20 +1014,49 @@ export default function CasterCycleApp() {
     setSelectedSkin("spark");
   }, []);
 
-  const unlockPass = useCallback((plan: "weekly" | "yearly") => {
+  const unlockPass = useCallback((plan: "weekly" | "lifetime") => {
     const key = plan === "weekly" ? "weeklyUntil" : "annualUntil";
-    const seconds = plan === "weekly" ? WEEK_SECONDS : YEAR_SECONDS;
+    const seconds = plan === "weekly" ? WEEK_SECONDS : LIFETIME_SECONDS;
     const until = Math.floor(Date.now() / 1000) + seconds;
     if (plan === "weekly") setWeeklyUntil(until);
     else setAnnualUntil(until);
     try {
       localStorage.setItem(`${STORAGE_PREFIX}:${key}`, String(until));
       localStorage.setItem(`${STORAGE_PREFIX}:skin`, "carbon");
+      localStorage.setItem(`${STORAGE_PREFIX}:rideArea`, plan === "weekly" ? "statePark" : "bikeLand");
     } catch {}
     setSelectedSkin("carbon");
-    setToast(plan === "weekly" ? "Weekly pass active" : "Year pass active");
+    const unlockedArea = plan === "weekly" ? "statePark" : "bikeLand";
+    setRideArea(unlockedArea);
+    gameRef.current = makeGame(unlockedArea);
+    syncHud();
+    setToast(plan === "weekly" ? "State Park weekly active" : "State Park lifetime active");
     haptic("success");
-  }, []);
+  }, [syncHud]);
+
+  const chooseRideArea = useCallback((area: RideArea) => {
+    if (area === "statePark" && !effectivePro) {
+      setDashboardTab("shop");
+      setToast("Unlock State Park");
+      haptic("warning");
+      return;
+    }
+    if (area === "bikeLand" && !annualActive) {
+      setDashboardTab("shop");
+      setToast("Unlock Lifetime Pass");
+      haptic("warning");
+      return;
+    }
+    setRideArea(area);
+    try {
+      localStorage.setItem(`${STORAGE_PREFIX}:rideArea`, area);
+    } catch {}
+    if (gameRef.current.phase !== "riding") {
+      gameRef.current = makeGame(area);
+      syncHud();
+    }
+    haptic("selection");
+  }, [annualActive, effectivePro, syncHud]);
 
   useEffect(() => {
     loadStats(gameRef.current.dateKey);
@@ -1444,12 +1480,13 @@ export default function CasterCycleApp() {
                   </div>
                 </div>
 
-                <div className="mt-4 grid grid-cols-4 gap-1.5 rounded-md border border-white/10 bg-black/18 p-1">
+                <div className="mt-4 grid grid-cols-5 gap-1 rounded-md border border-white/10 bg-black/18 p-1">
                   {([
                     { id: "ride", label: "Ride", icon: <Map size={15} /> },
-                    { id: "base", label: "Base", icon: <Wallet size={15} /> },
-                    { id: "garage", label: "Garage", icon: <Bike size={15} /> },
-                    { id: "leaders", label: "Ranks", icon: <Trophy size={15} /> },
+                    { id: "shop", label: "Shop", icon: <Wallet size={15} /> },
+                    { id: "garage", label: "Bike", icon: <Bike size={15} /> },
+                    { id: "club", label: "Club", icon: <Users size={15} /> },
+                    { id: "leaders", label: "Rank", icon: <Trophy size={15} /> },
                   ] as { id: DashboardTab; label: string; icon: React.ReactNode }[]).map((item) => (
                     <button
                       key={item.id}
@@ -1474,6 +1511,8 @@ export default function CasterCycleApp() {
                       <ResultStat label="best" value={Math.max(stats.bestAll, hud.score).toLocaleString()} />
                       <ResultStat label="streak" value={String(stats.streak)} />
                     </div>
+
+                    <AreaPicker selected={rideArea} proActive={effectivePro} lifetimeActive={annualActive} onSelect={chooseRideArea} />
 
                     <MissionPanel mission={game.mission} status={mission} />
 
@@ -1503,7 +1542,7 @@ export default function CasterCycleApp() {
                   </>
                 )}
 
-                {dashboardTab === "base" && (
+                {dashboardTab === "shop" && (
                   <>
                     <div className="mt-4 grid grid-cols-2 gap-2">
                       <button
@@ -1541,7 +1580,14 @@ export default function CasterCycleApp() {
                 )}
 
                 {dashboardTab === "garage" && (
-                  <SkinPicker skins={SKINS} selected={selectedSkin} isUnlocked={skinUnlocked} onSelect={setSelectedSkin} />
+                  <>
+                    <AreaPicker selected={rideArea} proActive={effectivePro} lifetimeActive={annualActive} onSelect={chooseRideArea} />
+                    <SkinPicker skins={SKINS} selected={selectedSkin} isUnlocked={skinUnlocked} onSelect={setSelectedSkin} />
+                  </>
+                )}
+
+                {dashboardTab === "club" && (
+                  <LoungePanel proActive={effectivePro} user={user ?? undefined} />
                 )}
 
                 {dashboardTab === "leaders" && (
@@ -1603,22 +1649,22 @@ function OnboardingPanel({
     {
       icon: <Bike size={22} />,
       kicker: "Welcome",
-      title: "Ride today's lane.",
-      body: `${routeName} is live for everyone on Farcaster.`,
+      title: "Pick a park.",
+      body: `${routeName} is today's social ride. Start free, then unlock bigger worlds when you want them.`,
       accent: "#fbe764",
     },
     {
       icon: <Zap size={22} />,
       kicker: "Flow",
-      title: "Dodge. Hop. Boost.",
-      body: "Charge bolts build score. Clean lines build streaks.",
+      title: "Chain clean lines.",
+      body: "Tap lanes, hop hazards, collect charge, and keep battery for a stronger finish.",
       accent: "#7cf2ff",
     },
     {
       icon: <Share2 size={22} />,
       kicker: "Social",
-      title: "Cast the run.",
-      body: "Share scores, chase friends, claim Base credits.",
+      title: "Cast the score.",
+      body: "Share the result, climb friends, save the app, and bring your Farcaster identity into the ride.",
       accent: "#a2ff9a",
     },
   ];
@@ -1794,6 +1840,63 @@ function WelcomeBackPanel({
       >
         Not now
       </button>
+    </div>
+  );
+}
+
+function AreaPicker({
+  selected,
+  proActive,
+  lifetimeActive,
+  onSelect,
+}: {
+  selected: RideArea;
+  proActive: boolean;
+  lifetimeActive: boolean;
+  onSelect: (area: RideArea) => void;
+}) {
+  const areas = [
+    {
+      id: "park" as RideArea,
+      label: "Community Park",
+      meta: "Free ride",
+      icon: <Bike size={15} />,
+      locked: false,
+    },
+    {
+      id: "statePark" as RideArea,
+      label: "State Park",
+      meta: proActive ? "Unlocked" : "$0.99 week",
+      icon: proActive ? <Sparkles size={15} /> : <Lock size={15} />,
+      locked: !proActive,
+    },
+    {
+      id: "bikeLand" as RideArea,
+      label: "E-Bike Land",
+      meta: lifetimeActive ? "Lifetime" : "$7 lifetime",
+      icon: lifetimeActive ? <Zap size={15} /> : <Lock size={15} />,
+      locked: !lifetimeActive,
+    },
+  ];
+
+  return (
+    <div className="mt-3 grid grid-cols-3 gap-2">
+      {areas.map((area) => (
+        <button
+          key={area.id}
+          className={`min-h-14 rounded-md border px-3 py-2 text-left transition active:scale-[0.98] ${
+            selected === area.id ? "border-[#fbe764]/70 bg-[#fbe764]/14" : "border-white/12 bg-white/7"
+          }`}
+          onClick={() => onSelect(area.id)}
+        >
+          <span className="flex items-center justify-between gap-2">
+            <span className="text-[#7cf2ff]">{area.icon}</span>
+            {selected === area.id && <span className="h-2 w-2 rounded-full bg-[#fbe764]" />}
+          </span>
+          <span className="mt-1 block truncate text-xs font-black text-white">{area.label}</span>
+          <span className="block truncate text-[10px] font-bold uppercase tracking-[0.08em] text-white/45">{area.meta}</span>
+        </button>
+      ))}
     </div>
   );
 }
@@ -2151,6 +2254,143 @@ function Leaderboard({
   );
 }
 
+function LoungePanel({ proActive, user }: { proActive: boolean; user?: { fid?: number; username?: string; displayName?: string; pfpUrl?: string } }) {
+  const [messages, setMessages] = useState<LoungeMessage[]>([]);
+  const [draft, setDraft] = useState("");
+  const [status, setStatus] = useState("");
+  const [posting, setPosting] = useState(false);
+  const emojis = ["🚲", "⚡", "🌲", "🏀", "🎾", "⚽", "🛹"];
+
+  const cleanDraft = (value: string) =>
+    value
+      .replace(/https?:\/\/\S+|www\.\S+/gi, "")
+      .replace(/\s+/g, " ")
+      .slice(0, 100);
+
+  const loadMessages = useCallback(async () => {
+    try {
+      const res = await fetch("/api/lounge", { cache: "no-store" });
+      const data = await res.json();
+      if (Array.isArray(data.rows)) setMessages(data.rows);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (proActive) void loadMessages();
+  }, [loadMessages, proActive]);
+
+  const sendMessage = async () => {
+    const text = cleanDraft(draft).trim();
+    if (!proActive) {
+      setStatus("Pass required");
+      return;
+    }
+    if (!user?.fid) {
+      setStatus("Open in Farcaster");
+      return;
+    }
+    if (!text) return;
+    setPosting(true);
+    setStatus("");
+    try {
+      const res = await sdk.quickAuth.fetch("/api/lounge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text,
+          username: user.username || "",
+          displayName: user.displayName || "",
+          pfpUrl: user.pfpUrl || "",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatus(data.error || "Message blocked");
+        return;
+      }
+      setDraft("");
+      if (Array.isArray(data.rows)) setMessages(data.rows);
+      haptic("success");
+    } catch {
+      setStatus("Lounge unavailable");
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  if (!proActive) {
+    return (
+      <div className="mt-4 rounded-md border border-[#7cf2ff]/24 bg-[#7cf2ff]/10 p-4">
+        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#7cf2ff]">
+          <Users size={13} />
+          Paid Club Lounge
+        </div>
+        <div className="mt-2 text-lg font-black text-white">Unlock the rider club.</div>
+        <p className="mt-1 text-xs font-semibold leading-5 text-white/58">Short clean chat, garage talk, and paid rider drops live here.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#7cf2ff]">
+          <Users size={13} />
+          Club Lounge
+        </div>
+        <button className="rounded border border-white/12 bg-white/7 px-2 py-1 text-[10px] font-black uppercase text-white/62" onClick={loadMessages}>
+          refresh
+        </button>
+      </div>
+      <div className="mt-2 max-h-40 overflow-hidden rounded-md border border-white/12 bg-white/7">
+        {messages.length === 0 ? (
+          <div className="px-3 py-4 text-xs font-semibold text-white/50">No lounge messages yet.</div>
+        ) : (
+          messages.slice(0, 6).map((message) => (
+            <div key={message.id} className="flex gap-2 border-b border-white/8 px-3 py-2 last:border-b-0">
+              <div
+                className="h-7 w-7 shrink-0 rounded bg-[#101923] bg-cover bg-center"
+                style={{ backgroundImage: message.pfpUrl ? `url("${message.pfpUrl}")` : undefined }}
+              />
+              <div className="min-w-0">
+                <div className="truncate text-[10px] font-black text-[#fbe764]">{message.username ? `@${message.username}` : message.displayName || "rider"}</div>
+                <div className="break-words text-xs font-semibold leading-4 text-white/78">{message.text}</div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+      <div className="mt-2 flex gap-1">
+        {emojis.map((emoji) => (
+          <button
+            key={emoji}
+            className="h-8 w-8 rounded-md border border-white/12 bg-white/7 text-sm"
+            onClick={() => setDraft((value) => cleanDraft(`${value}${emoji}`))}
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 flex gap-2">
+        <input
+          value={draft}
+          maxLength={100}
+          placeholder="100 chars, no links"
+          className="min-h-10 min-w-0 flex-1 rounded-md border border-white/12 bg-black/24 px-3 text-sm font-semibold text-white outline-none placeholder:text-white/32"
+          onChange={(event) => setDraft(cleanDraft(event.target.value))}
+        />
+        <button className="rounded-md bg-[#fbe764] px-3 text-xs font-black text-[#111923] disabled:opacity-60" disabled={posting || !draft.trim()} onClick={sendMessage}>
+          Send
+        </button>
+      </div>
+      <div className="mt-1 flex justify-between text-[10px] font-bold uppercase tracking-[0.08em] text-white/38">
+        <span>{status || "No links. Keep it clean."}</span>
+        <span>{draft.length}/100</span>
+      </div>
+    </div>
+  );
+}
+
 function UpgradePanel({
   enabled,
   isPro,
@@ -2167,17 +2407,17 @@ function UpgradePanel({
   annualActive: boolean;
   onConnect: () => void;
   onEthSupport: () => void;
-  onPassPurchased: (plan: "weekly" | "yearly") => void;
+  onPassPurchased: (plan: "weekly" | "lifetime") => void;
   onVoiceInfo: () => void;
 }) {
   const { address } = useAccount();
   const chainId = useChainId();
   const { switchChain } = useSwitchChain();
-  const [plan, setPlan] = useState<"weekly" | "yearly">("weekly");
-  const [pendingPlan, setPendingPlan] = useState<"weekly" | "yearly" | null>(null);
+  const [plan, setPlan] = useState<"weekly" | "lifetime">("weekly");
+  const [pendingPlan, setPendingPlan] = useState<"weekly" | "lifetime" | null>(null);
   const [step, setStep] = useState<"idle" | "buying">("idle");
   const price = BigInt(plan === "weekly" ? WEEKLY_PRICE : YEARLY_PRICE);
-  const priceLabel = plan === "weekly" ? "$1 weekly" : "$7 yearly";
+  const priceLabel = plan === "weekly" ? "$0.99 weekly" : "$7 lifetime";
 
   const { data: balance } = useReadContract({
     address: USDC_CONTRACT,
@@ -2257,7 +2497,7 @@ function UpgradePanel({
             Cycle Pass
           </div>
           <div className="mt-1 text-xs font-semibold text-white/64">
-            Unlock Carbon Pro, premium score flair, and future pro routes. Payments go direct to treasury on Base.
+            Open State Park for a week, or go lifetime for E-Bike Land, Carbon Pro, the club lounge, and future premium rides.
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -2277,14 +2517,16 @@ function UpgradePanel({
           style={{ borderColor: plan === "weekly" ? "#fbe764" : "rgba(255,255,255,0.14)" }}
           onClick={() => setPlan("weekly")}
         >
-          Weekly $1
+          <span className="block">Weekly $0.99</span>
+          <span className="mt-1 block text-[10px] font-bold text-white/52">State Park</span>
         </button>
         <button
           className="rounded-md border px-2 py-2 text-xs font-black text-white"
-          style={{ borderColor: plan === "yearly" ? "#fbe764" : "rgba(255,255,255,0.14)" }}
-          onClick={() => setPlan("yearly")}
+          style={{ borderColor: plan === "lifetime" ? "#fbe764" : "rgba(255,255,255,0.14)" }}
+          onClick={() => setPlan("lifetime")}
         >
-          Year $7
+          <span className="block">Lifetime $7</span>
+          <span className="mt-1 block text-[10px] font-bold text-white/52">All worlds</span>
         </button>
       </div>
       <button
@@ -2296,7 +2538,7 @@ function UpgradePanel({
         {!enabled
           ? "Connect for Base USDC"
           : selectedPlanActive
-            ? plan === "weekly" ? "Weekly Active" : "Year Pass Active"
+            ? plan === "weekly" ? "Weekly Active" : "Lifetime Active"
             : !treasuryReady
               ? "Set treasury address"
               : chainId !== BASE_CHAIN_ID
@@ -2389,48 +2631,192 @@ function drawWorld(ctx: CanvasRenderingContext2D, width: number, height: number,
   ctx.arc(sunX, sunY, 120, 0, Math.PI * 2);
   ctx.fill();
 
-  for (const side of [-1, 1]) {
-    for (let i = 0; i < 12; i += 1) {
-      const loop = (i * 140 - (game.distance * 0.55) % 140 + 140) % 140;
-      const progress = loop / 140;
-      const y = horizon + progress * (height - horizon);
-      const scale = 0.25 + progress * 1.2;
-      const x = width / 2 + side * (width * 0.33 + progress * width * 0.28);
-      const w = 28 * scale;
-      const h = (50 + ((i * 31 + game.seed) % 90)) * scale;
-      ctx.fillStyle = side < 0 ? "rgba(45,86,104,0.55)" : "rgba(55,69,109,0.5)";
-      ctx.fillRect(x - w / 2, y - h, w, h);
-      ctx.fillStyle = "rgba(255,231,112,0.35)";
-      if ((i + Math.round(now / 1000)) % 2 === 0) ctx.fillRect(x - w * 0.18, y - h * 0.72, w * 0.24, h * 0.08);
-    }
+  drawParkLandmarks(ctx, width, height, game, now);
+}
+
+function drawParkLandmarks(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel, now: number) {
+  const horizon = height * 0.25;
+  const statePark = game.route.area === "statePark";
+  const bikeLand = game.route.area === "bikeLand";
+
+  const grass = ctx.createLinearGradient(0, horizon, 0, height);
+  grass.addColorStop(0, bikeLand ? "rgba(67,54,130,0.38)" : statePark ? "rgba(92,156,84,0.36)" : "rgba(139,203,82,0.36)");
+  grass.addColorStop(0.58, bikeLand ? "rgba(38,120,122,0.72)" : statePark ? "rgba(50,112,74,0.72)" : "rgba(73,151,78,0.66)");
+  grass.addColorStop(1, bikeLand ? "rgba(28,35,75,0.92)" : "rgba(24,65,50,0.92)");
+  ctx.fillStyle = grass;
+  ctx.fillRect(0, horizon, width, height - horizon);
+
+  if (statePark || bikeLand) {
+    ctx.fillStyle = "rgba(48,88,82,0.7)";
+    ctx.beginPath();
+    ctx.moveTo(0, horizon + 54);
+    ctx.lineTo(width * 0.22, horizon - 8);
+    ctx.lineTo(width * 0.44, horizon + 54);
+    ctx.lineTo(width * 0.66, horizon - 18);
+    ctx.lineTo(width, horizon + 58);
+    ctx.lineTo(width, horizon + 110);
+    ctx.lineTo(0, horizon + 110);
+    ctx.closePath();
+    ctx.fill();
   }
 
+  ctx.save();
+  ctx.globalAlpha = statePark ? 0.72 : 0.62;
+  ctx.strokeStyle = bikeLand ? "rgba(255,122,223,0.68)" : statePark ? "rgba(124,242,255,0.72)" : "rgba(95,202,234,0.66)";
+  ctx.lineWidth = bikeLand ? 14 : statePark ? 18 : 12;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  for (let i = 0; i < 9; i += 1) {
+    const y = horizon + i * ((height - horizon) / 8);
+    const x = width * (statePark ? 0.18 : 0.82) + Math.sin(i * 1.1 + now / 1600) * width * 0.08;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.restore();
+
+  const labels = bikeLand
+    ? ["PUMP", "VELO", "JUMPS", "SHOP", "CLUB", "GLOW"]
+    : statePark
+    ? ["RIVER", "PINES", "LOOKOUT", "MEADOW", "TRAIL"]
+    : ["SKATE", "HOOPS", "TENNIS", "SOCCER", "PICNIC", "STREAM"];
+
   for (const side of [-1, 1]) {
-    for (let i = 0; i < 5; i += 1) {
-      const loop = (i * 230 - (game.distance * 0.72) % 230 + 230) % 230;
-      const progress = loop / 230;
+    for (let i = 0; i < 8; i += 1) {
+      const loop = (i * 190 - (game.distance * (statePark ? 0.58 : 0.72)) % 190 + 190) % 190;
+      const progress = loop / 190;
       const y = horizon + progress * (height - horizon);
-      const scale = 0.35 + progress * 0.9;
-      const x = width / 2 + side * (width * 0.28 + progress * width * 0.34);
-      const panelW = 44 * scale;
-      const panelH = 30 * scale;
+      const scale = 0.28 + progress * 1.08;
+      const x = width / 2 + side * (width * (0.24 + progress * 0.38));
+      const label = labels[(i + (side > 0 ? 2 : 0)) % labels.length];
       ctx.save();
-      ctx.translate(x, y - 70 * scale);
-      ctx.rotate(side * -0.12);
-      ctx.fillStyle = "rgba(17,25,35,0.74)";
-      ctx.strokeStyle = i % 2 === 0 ? "rgba(124,242,255,0.7)" : "rgba(251,231,100,0.65)";
-      ctx.lineWidth = Math.max(1, 2 * scale);
-      roundRect(ctx, -panelW / 2, -panelH / 2, panelW, panelH, 5 * scale);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = i % 2 === 0 ? "#7cf2ff" : "#fbe764";
-      ctx.font = `${Math.max(8, 12 * scale)}px system-ui, sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(i % 2 === 0 ? "FC" : "CC", 0, 0);
+      ctx.translate(x, y - 58 * scale);
+      ctx.rotate(side * (statePark ? -0.06 : -0.1));
+      ctx.scale(scale, scale);
+
+      if (bikeLand) {
+        drawBikeLandFeature(ctx, label, game.route.roadEdge);
+      } else if (statePark) {
+        drawPineCluster(ctx, label, game.route.roadEdge);
+      } else if (label === "SKATE") {
+        drawSkatepark(ctx);
+      } else if (label === "HOOPS") {
+        drawBasketballCourt(ctx);
+      } else if (label === "TENNIS") {
+        drawTennisCourt(ctx);
+      } else if (label === "SOCCER") {
+        drawSoccerField(ctx);
+      } else {
+        drawParkSign(ctx, label, game.route.roadEdge);
+      }
       ctx.restore();
     }
   }
+}
+
+function drawBikeLandFeature(ctx: CanvasRenderingContext2D, label: string, accent: string) {
+  ctx.fillStyle = "rgba(22,28,62,0.9)";
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2;
+  roundRect(ctx, -42, -24, 84, 48, 9);
+  ctx.fill();
+  ctx.stroke();
+  ctx.strokeStyle = label === "VELO" ? "#fbe764" : "#ff7adf";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  if (label === "VELO") {
+    ctx.ellipse(0, 2, 29, 15, 0, 0, Math.PI * 2);
+  } else {
+    ctx.moveTo(-30, 14);
+    ctx.quadraticCurveTo(-15, -20, 0, 8);
+    ctx.quadraticCurveTo(16, 32, 32, -10);
+  }
+  ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "900 10px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, 0, -4);
+}
+
+function drawParkSign(ctx: CanvasRenderingContext2D, label: string, accent: string) {
+  ctx.fillStyle = "rgba(17,45,36,0.82)";
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2;
+  roundRect(ctx, -34, -18, 68, 36, 6);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "900 10px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, 0, 0);
+}
+
+function drawSkatepark(ctx: CanvasRenderingContext2D) {
+  ctx.fillStyle = "rgba(37,54,64,0.86)";
+  roundRect(ctx, -40, -22, 80, 44, 8);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.72)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(-18, 2, 16, 0, Math.PI, true);
+  ctx.arc(20, 2, 16, 0, Math.PI, true);
+  ctx.stroke();
+}
+
+function drawBasketballCourt(ctx: CanvasRenderingContext2D) {
+  ctx.fillStyle = "rgba(210,104,62,0.86)";
+  roundRect(ctx, -38, -22, 76, 44, 5);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.78)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-30, -16, 60, 32);
+  ctx.beginPath();
+  ctx.arc(0, 0, 10, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function drawTennisCourt(ctx: CanvasRenderingContext2D) {
+  ctx.fillStyle = "rgba(46,154,113,0.88)";
+  roundRect(ctx, -40, -24, 80, 48, 5);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.8)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-32, -18, 64, 36);
+  ctx.beginPath();
+  ctx.moveTo(0, -18);
+  ctx.lineTo(0, 18);
+  ctx.moveTo(-32, 0);
+  ctx.lineTo(32, 0);
+  ctx.stroke();
+}
+
+function drawSoccerField(ctx: CanvasRenderingContext2D) {
+  ctx.fillStyle = "rgba(60,143,69,0.88)";
+  roundRect(ctx, -44, -25, 88, 50, 7);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.8)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(-36, -19, 72, 38);
+  ctx.beginPath();
+  ctx.arc(0, 0, 12, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+function drawPineCluster(ctx: CanvasRenderingContext2D, label: string, accent: string) {
+  for (let i = -1; i <= 1; i += 1) {
+    ctx.fillStyle = i === 0 ? "rgba(24,87,54,0.95)" : "rgba(29,105,65,0.86)";
+    ctx.beginPath();
+    ctx.moveTo(i * 18, -36);
+    ctx.lineTo(i * 18 - 18, 8);
+    ctx.lineTo(i * 18 + 18, 8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "rgba(91,65,38,0.92)";
+    ctx.fillRect(i * 18 - 3, 8, 6, 18);
+  }
+  drawParkSign(ctx, label, accent);
 }
 
 function drawSpeedLines(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel, now: number) {

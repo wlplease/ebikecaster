@@ -14,7 +14,6 @@
     "@farcaster/quick-auth": "^0.0.8",
     "@tanstack/react-query": "^5.100.14",
     "@vercel/analytics": "^1.6.1",
-    "firebase-admin": "^13.10.0",
     "lucide-react": "^0.548.0",
     "next": "^16.2.6",
     "react": "^19.2.6",
