@@ -79,7 +79,7 @@ constructor(
 Suggested first deployment:
 
 - `initialOwner`: your hardware/multisig owner wallet.
-- `token`: your e-bike ERC-20 token, for example `0x1471C903A19Ea87097e4523924D17F2C5Ead2B07`.
+- `token`: your in-game ERC-20 token, for example `0x0332e056526a5613fb05ae2ca6954ff7ab6a4b07`.
 - `initialRewardSigner`: a fresh backend signer address, not your owner wallet.
 - `maxClaimAmount_`: a tiny cap in raw token units, for example `2 * 10**18` for an 18-decimal token.
 
@@ -92,6 +92,10 @@ TOKEN_TROPHY_SIGNER_PRIVATE_KEY=0x... # backend signer private key, never owner 
 TOKEN_TROPHY_DAILY_AMOUNT=1
 TOKEN_TROPHY_WEEKLY_AMOUNT=2
 TOKEN_TROPHY_MIN_SCORE=2500
+NEXT_PUBLIC_GAME_TOKEN_ADDRESS=0x0332e056526a5613fb05ae2ca6954ff7ab6a4b07
+NEXT_PUBLIC_GAME_TOKEN_SYMBOL=CYCLE
+NEXT_PUBLIC_AIRDROP_ROUND_TOKENS=100000
+NEXT_PUBLIC_AIRDROP_DAY_PASS_TOKENS=1000000
 ```
 
 Before launching token trophies publicly, publish plain rules in-app/website terms: no purchase necessary, skill-based leaderboard eligibility, trophy amount, deadline, geographic limits if any, tax responsibility, and your right to pause/correct fraud or errors.
@@ -105,3 +109,5 @@ Recommended public wording:
 - No promise of market value, liquidity, resale, payout, tax treatment, or future rewards.
 - Users control their wallets, approve their own transactions, pay their own gas, and handle their own taxes.
 - The operator may pause, deny, correct, or revoke claims for abuse, errors, fraud, security, or compliance reasons.
+- Airdrop token access is free-game balance-read only: no sale, no buy prompt, no burn, no spend, no redemption, no payout, and no transfer requirement.
+- If a player lacks the airdrop token, tell them to use free modes or ask a friend/community member for a free play drop if extras are available. Do not direct users to buy the token.

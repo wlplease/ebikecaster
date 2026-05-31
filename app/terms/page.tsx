@@ -24,6 +24,11 @@ const sections = [
       "CYCLE credits are non-transferable gameplay credits with no cash value. Optional token trophies, if enabled, are owner-funded, skill-based, no-purchase-needed gameplay trophies for closed verified leaderboards. Trophies are not guaranteed, not random, not wages, not yield, not staking, not an investment, and not a promise of resale value, market value, tax treatment, or future eligibility. CasterCycle may pause, deny, correct, or revoke claims for abuse, errors, fraud, security, or legal/compliance reasons. Void where prohibited.",
   },
   {
+    title: "Airdrop Access Token",
+    body:
+      "The in-game access token is intended as a free follower airdrop and gameplay access signal only. Do not buy it. If you do not have tokens, use the free game modes or ask a friend/community member for a free play drop if extras are available. CasterCycle reads wallet balance without burning or spending the token: 100,000 tokens may unlock one extended daily round, and 1,000,000 tokens may unlock day-pass-style play while held. This is not a sale, buy recommendation, security, investment, reward promise, loyalty program, sweepstakes, wage, or cash-value program. There is no promised price, liquidity, redemption, payout, tax treatment, or future benefit. Thresholds and access rules may change or be disabled for abuse, errors, security, or compliance.",
+  },
+  {
     title: "Kingbull Fan Content",
     body:
       "The Kingbull Ranger area is unaffiliated fan content. CasterCycle is not sponsored by, affiliated with, or endorsed by Kingbull. Product names, marks, videos, specs, prices, promotions, availability, shipping, warranties, and local e-bike rules can change. Promo buttons may be affiliate links that compensate us. Verify all important details with Kingbull and local authorities before buying or riding.",
@@ -56,7 +61,7 @@ export default function TermsPage() {
           <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#fbe764]">terms and disclaimer</div>
           <h1 className="mt-2 text-3xl font-black tracking-normal text-white">CasterCycle Terms</h1>
           <p className="mt-2 text-sm font-semibold leading-6 text-white/62">
-            Updated {UPDATED}. Short version: play hard, share scores, keep control of your wallet, verify products and laws yourself, and do not treat the app as advice or a guarantee.
+            Updated {UPDATED}. Short version: play hard, share scores, keep control of your wallet, verify products and laws yourself, do not buy the game token, and do not treat the app as advice or a guarantee.
           </p>
         </div>
 

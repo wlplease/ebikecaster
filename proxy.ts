@@ -1,18 +1,29 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-// OFAC sanctioned & restricted countries
+// Sanctions/compliance restricted countries and regions. Keep this conservative for token features.
 const BLOCKED_COUNTRIES = new Set([
   "CU", "IR", "KP", "SY", "RU", "BY", "MM", "SD", "SS",
   "CF", "CD", "LY", "SO", "YE", "ZW", "NI", "VE",
 ]);
 
 const BLOCKED_US_REGIONS = new Set(["NY"]);
+const BLOCKED_UA_REGIONS = new Set(["09", "14", "23", "43", "65"]);
+
+function applySecurityHeaders(response: NextResponse) {
+  response.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("X-Frame-Options", "SAMEORIGIN");
+  response.headers.set("X-XSS-Protection", "1; mode=block");
+  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  return response;
+}
 
 export function proxy(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  if (pathname === "/blocked" || pathname.startsWith("/api/")) {
+  if (pathname === "/blocked") {
     return NextResponse.next();
   }
 
@@ -21,21 +32,20 @@ export function proxy(request: NextRequest) {
 
   const isBlockedCountry = country && BLOCKED_COUNTRIES.has(country);
   const isBlockedState = country === "US" && region && BLOCKED_US_REGIONS.has(region);
+  const isBlockedUkraineRegion = country === "UA" && region && BLOCKED_UA_REGIONS.has(region);
 
-  if (isBlockedCountry || isBlockedState) {
+  if (isBlockedCountry || isBlockedState || isBlockedUkraineRegion) {
+    if (pathname.startsWith("/api/")) {
+      return applySecurityHeaders(NextResponse.json({ error: "Region restricted." }, { status: 451 }));
+    }
     const blockedUrl = new URL("/blocked", request.url);
-    blockedUrl.searchParams.set("c", isBlockedState ? `US-${region}` : country);
-    return NextResponse.rewrite(blockedUrl);
+    blockedUrl.searchParams.set("c", isBlockedState ? `US-${region}` : isBlockedUkraineRegion ? `UA-${region}` : country);
+    return applySecurityHeaders(NextResponse.rewrite(blockedUrl));
   }
 
   const response = NextResponse.next();
 
-  response.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
-  response.headers.set("X-Content-Type-Options", "nosniff");
-  response.headers.set("X-Frame-Options", "SAMEORIGIN");
-  response.headers.set("X-XSS-Protection", "1; mode=block");
-  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  applySecurityHeaders(response);
   const scriptSrc = process.env.NODE_ENV === "development"
     ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
     : "script-src 'self' 'unsafe-inline'";

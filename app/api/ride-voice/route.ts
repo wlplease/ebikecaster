@@ -66,7 +66,7 @@ function voiceLine(line: LineId, request: NextRequest) {
   if (line === "boost") return "Boost chain. Keep it clean.";
   if (line === "mission") return `${mission} cleared. Nice ride.`;
   if (line === "finish") return "Ride complete. Share the score and make the feed chase you.";
-  if (line === "legal") return "CasterCycle is for entertainment. Pass payments go directly to the treasury on Base. CYCLE credits and token trophies are optional gameplay features, not investment, legal, tax, safety, or purchase advice, and have no promised cash value.";
+  if (line === "legal") return "CasterCycle is for entertainment. The airdrop token is free game access only. Do not buy it. Ask a friend or the community for a free play drop if needed. No token, credit, trophy, pass, or link is investment, legal, tax, safety, or purchase advice, and none has promised cash value.";
   if (line === "lowBattery") return "Low charge. Collect bolts or keep the line clean.";
   if (line === "checkpoint") return "Halfway marker. Hold the flow and bring it home.";
   if (line === "combo") return "Ten flow. You are locked into the lane.";

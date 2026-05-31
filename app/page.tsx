@@ -28,7 +28,7 @@ import {
   Zap,
 } from "lucide-react";
 import { sdk } from "@farcaster/miniapp-sdk";
-import { formatUnits, parseEther } from "viem";
+import { formatUnits, parseEther, parseUnits } from "viem";
 import { useAccount, useChainId, useConnect, useReadContract, useSendTransaction, useSwitchChain, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { useFarcasterUser } from "@/components/farcaster-gate";
 import { CASTER_CREDITS_ABI, CASTER_CREDITS_CONTRACT, type RewardClaimPayload } from "@/lib/reward-credits";
@@ -53,6 +53,7 @@ const STORAGE_PREFIX = "castercycle";
 const DAY_SECONDS = 24 * 60 * 60;
 const LIFETIME_SECONDS = 80 * 365 * 24 * 60 * 60;
 const FREE_ROAM_SECONDS = 30;
+const AIRDROP_ROUND_SECONDS = 180;
 const KINGBULL_AWIN_URL = "https://www.awin1.com/cread.php?awinmid=124136&awinaffid=2916043";
 const KINGBULL_DISCOVER_ST_URL = "https://www.kingbullbike.com/products/kingbull-discover-st2-0-premium-off-road-city-electric-bike";
 const KINGBULL_DISCOVER_ST_AWIN_URL = `${KINGBULL_AWIN_URL}&ued=${encodeURIComponent(KINGBULL_DISCOVER_ST_URL)}`;
@@ -60,11 +61,11 @@ const KINGBULL_RANGER_URL = "https://sovrn.co/1f76den";
 const KINGBULL_SOVRN_URL = KINGBULL_RANGER_URL;
 const KINGBULL_COUPON_CODE = process.env.NEXT_PUBLIC_KINGBULL_COUPON_CODE || "GET50OFF";
 const KINGBULL_REDDIT_SEARCH_URL = "https://www.reddit.com/r/ebikes/search/?q=kingbull%20ranger&restrict_sr=1";
-const EBIKE_TOKEN_ADDRESS = (process.env.NEXT_PUBLIC_EBIKE_TOKEN_ADDRESS || "0x1471C903A19Ea87097e4523924D17F2C5Ead2B07") as `0x${string}`;
-const EBIKE_TOKEN_SYMBOL = process.env.NEXT_PUBLIC_EBIKE_TOKEN_SYMBOL || "EBIKE";
-const EBIKE_TOKEN_DECIMALS = Number(process.env.NEXT_PUBLIC_EBIKE_TOKEN_DECIMALS || "18");
-const EBIKE_TOKEN_INFO_URL = process.env.NEXT_PUBLIC_EBIKE_TOKEN_INFO_URL || "";
-const EBIKE_TOKEN_MARKET_URL = process.env.NEXT_PUBLIC_EBIKE_TOKEN_MARKET_URL || "";
+const EBIKE_TOKEN_ADDRESS = (process.env.NEXT_PUBLIC_GAME_TOKEN_ADDRESS || process.env.NEXT_PUBLIC_EBIKE_TOKEN_ADDRESS || "0x0332e056526a5613fb05ae2ca6954ff7ab6a4b07") as `0x${string}`;
+const EBIKE_TOKEN_SYMBOL = process.env.NEXT_PUBLIC_GAME_TOKEN_SYMBOL || process.env.NEXT_PUBLIC_EBIKE_TOKEN_SYMBOL || "CYCLE";
+const EBIKE_TOKEN_DECIMALS = Number(process.env.NEXT_PUBLIC_GAME_TOKEN_DECIMALS || process.env.NEXT_PUBLIC_EBIKE_TOKEN_DECIMALS || "18");
+const AIRDROP_ROUND_TOKENS = process.env.NEXT_PUBLIC_AIRDROP_ROUND_TOKENS || "100000";
+const AIRDROP_DAY_PASS_TOKENS = process.env.NEXT_PUBLIC_AIRDROP_DAY_PASS_TOKENS || "1000000";
 const TERMS_URL = `${APP_URL}/terms`;
 
 type RidePhase = "ready" | "riding" | "finished";
@@ -285,6 +286,13 @@ type PassReceipt = {
   txLabel: string;
   purchasedAt: number;
   validUntil: number;
+};
+
+type AirdropAccess = {
+  holder: boolean;
+  round: boolean;
+  day: boolean;
+  balanceLabel: string;
 };
 
 type RideRecap = {
@@ -976,6 +984,7 @@ export default function CasterCycleApp() {
   const motorAudioRef = useRef<MotorAudio | null>(null);
   const voiceRef = useRef<HTMLAudioElement | null>(null);
   const ghostPreviewRef = useRef(false);
+  const airdropRoundRef = useRef(false);
   const freeRideRef = useRef<FreeRideModel>({
     area: "park",
     x: 0,
@@ -1005,6 +1014,7 @@ export default function CasterCycleApp() {
   const [hud, setHud] = useState<Hud>(() => emptyHud(gameRef.current));
   const [freeRideActive, setFreeRideActive] = useState(false);
   const [ghostPreviewActive, setGhostPreviewActive] = useState(false);
+  const [airdropRoundActive, setAirdropRoundActive] = useState(false);
   const [freeRideHud, setFreeRideHud] = useState<FreeRideHud>({
     active: false,
     speed: 0,
@@ -1053,6 +1063,8 @@ export default function CasterCycleApp() {
   const [rideArea, setRideArea] = useState<RideArea>("park");
   const [ethSupporter, setEthSupporter] = useState(false);
   const [tokenHolder, setTokenHolder] = useState(false);
+  const [airdropAccess, setAirdropAccess] = useState<AirdropAccess>({ holder: false, round: false, day: false, balanceLabel: "0" });
+  const [airdropRoundUsedDate, setAirdropRoundUsedDate] = useState("");
   const [dayUntil, setDayUntil] = useState(0);
   const [annualUntil, setAnnualUntil] = useState(0);
   const [audioEnabled, setAudioEnabled] = useState(false);
@@ -1078,8 +1090,12 @@ export default function CasterCycleApp() {
   const parkEvent = dailyParkEvent(game.dateKey);
   const dayActive = dayUntil > Math.floor(Date.now() / 1000);
   const annualActive = annualUntil > Math.floor(Date.now() / 1000);
-  const effectivePro = dayActive || annualActive;
+  const tokenDayActive = airdropAccess.day;
+  const airdropRoundAvailable = airdropAccess.round && !tokenDayActive && airdropRoundUsedDate !== game.dateKey;
+  const effectivePro = dayActive || annualActive || tokenDayActive;
   const passUntil = Math.max(dayUntil, annualUntil);
+  const passDisplayUntil = tokenDayActive && !dayActive && !annualActive ? Math.floor(Date.now() / 1000) + DAY_SECONDS : passUntil;
+  const accessLabel = tokenDayActive ? `${EBIKE_TOKEN_SYMBOL} day pass` : effectivePro ? formatPassExpiry(passUntil) : airdropRoundAvailable ? `${EBIKE_TOKEN_SYMBOL} round ready` : "30s free roam";
 
   const skinUnlocked = useCallback((item: Skin) => {
     if (item.unlock === "base") return true;
@@ -1103,6 +1119,7 @@ export default function CasterCycleApp() {
       if (savedSkin && SKINS.some((item) => item.id === savedSkin)) setSelectedSkin(savedSkin);
       setEthSupporter(localStorage.getItem(`${STORAGE_PREFIX}:ethSupporter`) === "1");
       setClaimedBadge(localStorage.getItem(`${STORAGE_PREFIX}:badge:${dateKey}`) === "1");
+      setAirdropRoundUsedDate(localStorage.getItem(`${STORAGE_PREFIX}:airdropRoundUsedDate`) || "");
       try {
         const receipts = JSON.parse(localStorage.getItem(`${STORAGE_PREFIX}:passReceipts`) || "[]") as PassReceipt[];
         setPassReceipts(Array.isArray(receipts) ? receipts.slice(0, 5) : []);
@@ -1166,7 +1183,7 @@ export default function CasterCycleApp() {
       message: free.messageT > 0 ? free.message : "",
       objectives: freeRideObjectives(free),
       terrain: freeRideTerrain(free.x, free.y, free.area).short,
-      unlimited: effectivePro && !ghostPreviewRef.current,
+      unlimited: effectivePro && !ghostPreviewRef.current && !airdropRoundRef.current,
       zone: free.zone,
     });
   }, [effectivePro, freeRideActive]);
@@ -1551,7 +1568,9 @@ export default function CasterCycleApp() {
     if (!wasPreview) submitFreestyleScore(freeRideRef.current);
     setFreeRideActive(false);
     ghostPreviewRef.current = false;
+    airdropRoundRef.current = false;
     setGhostPreviewActive(false);
+    setAirdropRoundActive(false);
     stopMotor();
     if (showShop) {
       setDashboardTab("shop");
@@ -1566,6 +1585,8 @@ export default function CasterCycleApp() {
     const free = freeRideRef.current;
     const selectedArea = options?.area ?? rideArea;
     const preview = options?.preview === true;
+    const airdropRound = !preview && !effectivePro && airdropRoundAvailable;
+    const dateKey = gameRef.current.dateKey;
     setLastRecap(null);
     free.area = selectedArea;
     free.x = selectedArea === "bikeLand" ? 1010 : selectedArea === "statePark" ? 80 : 0;
@@ -1576,7 +1597,7 @@ export default function CasterCycleApp() {
     free.speed = selectedArea === "bikeLand" ? 155 : selectedArea === "statePark" ? 145 : 132;
     free.pedalPower = 0.35;
     free.distance = 0;
-    free.remaining = preview ? 10 : FREE_ROAM_SECONDS;
+    free.remaining = preview ? 10 : airdropRound ? AIRDROP_ROUND_SECONDS : FREE_ROAM_SECONDS;
     free.parkScore = 0;
     free.combo = 0;
     free.pickupCooldown = 0;
@@ -1586,24 +1607,32 @@ export default function CasterCycleApp() {
     free.voiceCooldown = 0;
     free.submitted = false;
     free.terrain = selectedArea === "bikeLand" ? "Neon" : selectedArea === "statePark" ? "Downhill" : "Grass";
-    free.message = preview ? "10s E-Bike Land preview" : "";
-    free.messageT = preview ? 1.8 : 0;
+    free.message = preview ? "10s E-Bike Land preview" : airdropRound ? "Airdrop round live" : "";
+    free.messageT = preview || airdropRound ? 1.8 : 0;
     free.zone = selectedArea === "bikeLand" ? "E-Bike Land" : selectedArea === "statePark" ? "Pine Loop" : "Trailhead";
     free.warned = false;
     free.visitedZones = [free.zone];
     gameRef.current.phase = "ready";
     ghostPreviewRef.current = preview;
+    airdropRoundRef.current = airdropRound;
     setGhostPreviewActive(preview);
+    setAirdropRoundActive(airdropRound);
+    if (airdropRound) {
+      setAirdropRoundUsedDate(dateKey);
+      try {
+        localStorage.setItem(`${STORAGE_PREFIX}:airdropRoundUsedDate`, dateKey);
+      } catch {}
+    }
     setFreeRideActive(true);
     setUpgradeIntent(false);
     setShowIntro(false);
     setShowWelcomeBack(false);
     setDashboardTab("ride");
-    setToast(preview ? "10 second E-Bike Land preview" : selectedArea === "statePark" ? "State Park roam" : effectivePro ? "Unlimited freestyle" : "30 seconds free");
+    setToast(preview ? "10 second E-Bike Land preview" : airdropRound ? "Airdrop round live" : selectedArea === "statePark" ? "State Park roam" : effectivePro ? "Unlimited freestyle" : "30 seconds free");
     haptic("success");
     playSfx("start");
-    if (voiceEnabled) playVoice("ready", { route: preview ? "E-Bike Land preview" : "Freestyle Park" });
-  }, [destinationSpot, effectivePro, playSfx, playVoice, rideArea, voiceEnabled]);
+    if (voiceEnabled) playVoice("ready", { route: preview ? "E-Bike Land preview" : airdropRound ? "Airdrop Round" : "Freestyle Park" });
+  }, [airdropRoundAvailable, destinationSpot, effectivePro, playSfx, playVoice, rideArea, voiceEnabled]);
 
   const changeLane = useCallback((direction: -1 | 1) => {
     if (freeRideActive) {
@@ -1795,6 +1824,18 @@ export default function CasterCycleApp() {
     if (connector) connect({ connector });
   }, [connect, connectors]);
 
+  const handleAirdropAccess = useCallback((access: AirdropAccess) => {
+    setAirdropAccess((current) =>
+      current.holder === access.holder &&
+      current.round === access.round &&
+      current.day === access.day &&
+      current.balanceLabel === access.balanceLabel
+        ? current
+        : access,
+    );
+    setTokenHolder(access.holder);
+  }, []);
+
   const openExternal = useCallback(async (url: string) => {
     try {
       await sdk.actions.openUrl(url);
@@ -1844,6 +1885,10 @@ export default function CasterCycleApp() {
 
   const chooseRideArea = useCallback((area: RideArea) => {
     if (area === "bikeLand" && !effectivePro) {
+      if (airdropRoundAvailable) {
+        startFreeRide({ area: "bikeLand" });
+        return;
+      }
       startFreeRide({ area: "bikeLand", preview: true });
       return;
     }
@@ -1856,7 +1901,7 @@ export default function CasterCycleApp() {
       syncHud();
     }
     haptic("selection");
-  }, [effectivePro, startFreeRide, syncHud]);
+  }, [airdropRoundAvailable, effectivePro, startFreeRide, syncHud]);
 
   useEffect(() => {
     loadStats(gameRef.current.dateKey);
@@ -2065,7 +2110,7 @@ export default function CasterCycleApp() {
         if (free.voiceCooldown > 0) free.voiceCooldown = Math.max(0, free.voiceCooldown - dt);
         if ((!effectivePro || preview) && !free.warned && free.remaining <= 5 && free.remaining > 0) {
           free.warned = true;
-          setToast(preview ? "Preview ending" : "5 seconds left");
+          setToast(preview ? "Preview ending" : airdropRoundRef.current ? "Airdrop round ending" : "5 seconds left");
           haptic("warning");
           playSfx("warning");
         }
@@ -2080,7 +2125,7 @@ export default function CasterCycleApp() {
           stopFreeRide(true);
           playSfx("finish");
         }
-        drawFreeRideScene(ctx, width, height, free, skin, effectivePro && !preview, now, preview);
+        drawFreeRideScene(ctx, width, height, free, skin, effectivePro && !preview, now, preview, airdropRoundRef.current);
       } else if (current.phase === "riding") {
         const targetOffset = current.targetLane;
         current.laneOffset += (targetOffset - current.laneOffset) * Math.min(1, dt * 10);
@@ -2362,7 +2407,7 @@ export default function CasterCycleApp() {
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/25 shadow-[0_8px_24px_rgba(0,0,0,0.24)]">
           <div
             className="h-full rounded-full bg-gradient-to-r from-[#7cf2ff] via-[#fbe764] to-[#a2ff9a]"
-            style={{ width: `${freeRideActive && !freeRideHud.unlimited ? Math.round((freeRideHud.remaining / (ghostPreviewActive ? 10 : FREE_ROAM_SECONDS)) * 100) : Math.round(progress * 100)}%` }}
+            style={{ width: `${freeRideActive && !freeRideHud.unlimited ? Math.round((freeRideHud.remaining / (ghostPreviewActive ? 10 : airdropRoundActive ? AIRDROP_ROUND_SECONDS : FREE_ROAM_SECONDS)) * 100) : Math.round(progress * 100)}%` }}
           />
         </div>
         <StatusRibbon
@@ -2508,6 +2553,7 @@ export default function CasterCycleApp() {
                       bestAll={Math.max(stats.bestAll, hud.score)}
                       streak={stats.streak}
                       proActive={effectivePro}
+                      accessLabel={accessLabel}
                       sharing={sharing}
                       onStart={startRide}
                       onFreeRide={startFreeRide}
@@ -2517,8 +2563,10 @@ export default function CasterCycleApp() {
 
                     <PremiumWorldTeaser
                       proActive={effectivePro}
+                      tokenRoundReady={airdropRoundAvailable}
                       onShop={() => setDashboardTab("shop")}
                       onPreview={() => startFreeRide({ area: "bikeLand", preview: !effectivePro })}
+                      onTokenRound={() => startFreeRide({ area: "bikeLand" })}
                     />
 
                     <DashboardRangerCard
@@ -2570,7 +2618,7 @@ export default function CasterCycleApp() {
                       </button>
                       <div className="flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/15 bg-white/8 px-3 text-xs font-black text-white">
                         <ShieldCheck size={15} />
-                        {effectivePro ? formatPassExpiry(passUntil) : "Cycle Pass"}
+                        {accessLabel}
                       </div>
                     </div>
                     <CreditsPanel
@@ -2581,16 +2629,17 @@ export default function CasterCycleApp() {
                       finished={hud.phase === "finished"}
                       onConnect={connectWallet}
                     />
-                    <TokenGaragePanel
+                    <AirdropAccessPanel
                       enabled={isConnected}
                       address={address}
-                      onHolderChange={setTokenHolder}
+                      access={airdropAccess}
+                      onAccessChange={handleAirdropAccess}
                       onConnect={connectWallet}
-                      onOpen={openExternal}
+                      onOpenTerms={() => openExternal(TERMS_URL)}
                       onSelectTokenSkin={() => {
                         setSelectedSkin("token");
                         haptic("success");
-                        setToast("Token Rider equipped");
+                        setToast("Airdrop Rider equipped");
                       }}
                     />
                     <TokenTrophyPanel
@@ -2603,6 +2652,7 @@ export default function CasterCycleApp() {
                     <UpgradePanel
                       enabled={isConnected}
                       isPro={effectivePro}
+                      tokenDayActive={tokenDayActive}
                       dayActive={dayActive}
                       annualActive={annualActive}
                       urgent={upgradeIntent}
@@ -2611,14 +2661,14 @@ export default function CasterCycleApp() {
                       onPassPurchased={unlockPass}
                       onVoiceInfo={() => playVoice("legal", {}, true)}
                     />
-                    <PassHistoryPanel receipts={passReceipts} dayActive={dayActive} annualActive={annualActive} passUntil={passUntil} />
+                    <PassHistoryPanel receipts={passReceipts} dayActive={dayActive || tokenDayActive} annualActive={annualActive} passUntil={passDisplayUntil} />
                     <LegalDisclosurePanel onOpenTerms={() => openExternal(TERMS_URL)} />
                   </>
                 )}
 
                 {dashboardTab === "garage" && (
                   <>
-                    <AreaPicker selected={rideArea} proActive={effectivePro} lifetimeActive={annualActive} onSelect={chooseRideArea} />
+                    <AreaPicker selected={rideArea} proActive={effectivePro} lifetimeActive={annualActive} tokenRoundReady={airdropRoundAvailable} onSelect={chooseRideArea} />
                     <DestinationPicker area={rideArea} selected={destinationSpot} onSelect={setDestinationSpot} />
                     <SkinPicker skins={SKINS} selected={selectedSkin} isUnlocked={skinUnlocked} onSelect={setSelectedSkin} />
                   </>
@@ -2898,25 +2948,25 @@ function WelcomeBackPanel({
 
 function DashboardNav({ active, onSelect }: { active: DashboardTab; onSelect: (tab: DashboardTab) => void }) {
   const primary = [
-    { id: "ride" as DashboardTab, label: "Play", sub: "Ride", icon: <Play size={17} /> },
-    { id: "garage" as DashboardTab, label: "Bike", sub: "Setup", icon: <Bike size={17} /> },
-    { id: "shop" as DashboardTab, label: "Pass", sub: "$1/$7", icon: <Wallet size={17} /> },
+    { id: "ride" as DashboardTab, label: "Play", sub: "Dash & roam", icon: <Play size={17} /> },
+    { id: "garage" as DashboardTab, label: "World", sub: "Map & bike", icon: <Map size={17} /> },
+    { id: "shop" as DashboardTab, label: "Access", sub: "Pass & token", icon: <Wallet size={17} /> },
   ];
   const secondary = [
     { id: "club" as DashboardTab, label: "Club", icon: <Users size={14} /> },
-    { id: "quest" as DashboardTab, label: "Quest", icon: <Sparkles size={14} /> },
+    { id: "quest" as DashboardTab, label: "Fan", icon: <Sparkles size={14} /> },
     { id: "leaders" as DashboardTab, label: "Rank", icon: <Trophy size={14} /> },
   ];
 
   return (
-    <nav className="mt-3 rounded-md border border-white/10 bg-[#02070c]/58 p-1.5 shadow-inner">
+    <nav className="sticky top-0 z-10 mt-3 rounded-md border border-white/10 bg-[#02070c]/82 p-1.5 shadow-inner backdrop-blur-xl">
       <div className="grid grid-cols-3 gap-1.5">
         {primary.map((item) => {
           const selected = active === item.id;
           return (
             <button
               key={item.id}
-              className={`min-h-[54px] rounded-md border px-2 text-left transition active:scale-[0.98] ${
+              className={`min-h-[56px] rounded-md border px-2 text-left transition active:scale-[0.98] ${
                 selected ? "border-[#fbe764]/70 bg-[#fbe764] text-[#071018] shadow-[0_12px_26px_rgba(251,231,100,0.18)]" : "border-white/8 bg-white/[0.05] text-white/72"
               }`}
               onClick={() => onSelect(item.id)}
@@ -2926,7 +2976,7 @@ function DashboardNav({ active, onSelect }: { active: DashboardTab; onSelect: (t
                 {selected && <span className="h-1.5 w-1.5 rounded-full bg-[#071018]" />}
               </span>
               <span className="mt-1 block text-sm font-black leading-none">{item.label}</span>
-              <span className={`mt-0.5 block text-[9px] font-black uppercase tracking-[0.08em] ${selected ? "text-[#071018]/58" : "text-white/38"}`}>{item.sub}</span>
+              <span className={`mt-0.5 block truncate text-[8px] font-black uppercase tracking-[0.06em] ${selected ? "text-[#071018]/58" : "text-white/38"}`}>{item.sub}</span>
             </button>
           );
         })}
@@ -2959,6 +3009,7 @@ function WorldHub({
   bestAll,
   streak,
   proActive,
+  accessLabel,
   sharing,
   onStart,
   onFreeRide,
@@ -2971,6 +3022,7 @@ function WorldHub({
   bestAll: number;
   streak: number;
   proActive: boolean;
+  accessLabel: string;
   sharing: boolean;
   onStart: () => void;
   onFreeRide: () => void;
@@ -2979,7 +3031,6 @@ function WorldHub({
 }) {
   const event = dailyParkEvent();
   const activeRun = phase === "riding" || phase === "finished";
-  const passLabel = proActive ? "Unlimited active" : "30s free roam";
 
   return (
     <div className="mt-4">
@@ -3031,7 +3082,7 @@ function WorldHub({
       <div className="mt-2 flex min-h-11 items-center justify-between gap-3 rounded-md border border-white/10 bg-black/20 px-3">
         <div className="min-w-0">
           <div className="text-[9px] font-black uppercase tracking-[0.14em] text-white/42">access</div>
-          <div className="truncate text-sm font-black text-white">{passLabel}</div>
+          <div className="truncate text-sm font-black text-white">{accessLabel}</div>
         </div>
         <button
           className="inline-flex min-h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-white/12 bg-white/8 px-3 text-[10px] font-black uppercase tracking-[0.08em] text-white"
@@ -3093,15 +3144,27 @@ function DashboardRangerCard({ onQuest, onDeal }: { onQuest: () => void; onDeal:
   );
 }
 
-function PremiumWorldTeaser({ proActive, onShop, onPreview }: { proActive: boolean; onShop: () => void; onPreview: () => void }) {
+function PremiumWorldTeaser({
+  proActive,
+  tokenRoundReady,
+  onShop,
+  onPreview,
+  onTokenRound,
+}: {
+  proActive: boolean;
+  tokenRoundReady: boolean;
+  onShop: () => void;
+  onPreview: () => void;
+  onTokenRound: () => void;
+}) {
   return (
     <div className="mt-3 overflow-hidden rounded-md border border-[#ff7adf]/30 bg-[linear-gradient(135deg,rgba(255,122,223,0.16),rgba(124,242,255,0.10)_48%,rgba(251,231,100,0.10))]">
-      <button className="block w-full p-3 text-left active:scale-[0.99]" onClick={proActive ? onPreview : onShop}>
+      <button className="block w-full p-3 text-left active:scale-[0.99]" onClick={proActive ? onPreview : tokenRoundReady ? onTokenRound : onShop}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#ff9ee6]">
               <Crown size={13} />
-              {proActive ? "unlocked world" : "premium world"}
+              {proActive ? "unlocked world" : tokenRoundReady ? "airdrop round ready" : "premium world"}
             </div>
             <div className="mt-1 truncate text-lg font-black leading-tight text-white">E-Bike Land</div>
             <div className="mt-1 text-xs font-semibold leading-5 text-white/62">
@@ -3109,8 +3172,8 @@ function PremiumWorldTeaser({ proActive, onShop, onPreview }: { proActive: boole
             </div>
           </div>
           <div className="shrink-0 rounded-md border border-[#fbe764]/30 bg-[#fbe764]/14 px-2 py-1 text-right">
-            <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#fbe764]">{proActive ? "ready" : "pass"}</div>
-            <div className="text-sm font-black text-white">{proActive ? "Ride" : "$1/$7"}</div>
+            <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#fbe764]">{proActive ? "ready" : tokenRoundReady ? "token" : "pass"}</div>
+            <div className="text-sm font-black text-white">{proActive ? "Ride" : tokenRoundReady ? "Round" : "$1/$7"}</div>
           </div>
         </div>
         <div className="mt-3 grid grid-cols-4 gap-1.5">
@@ -3129,8 +3192,8 @@ function PremiumWorldTeaser({ proActive, onShop, onPreview }: { proActive: boole
       </button>
       {!proActive && (
         <div className="grid grid-cols-2 gap-2 border-t border-white/10 p-2">
-          <button className="min-h-9 rounded-md bg-[#fbe764] px-3 text-[10px] font-black uppercase text-[#071018] active:scale-[0.98]" onClick={onShop}>
-            Unlock
+          <button className="min-h-9 rounded-md bg-[#fbe764] px-3 text-[10px] font-black uppercase text-[#071018] active:scale-[0.98]" onClick={tokenRoundReady ? onTokenRound : onShop}>
+            {tokenRoundReady ? "Use round" : "Unlock"}
           </button>
           <button className="min-h-9 rounded-md border border-white/12 bg-white/8 px-3 text-[10px] font-black uppercase text-white/72 active:scale-[0.98]" onClick={onPreview}>
             Preview
@@ -3145,11 +3208,13 @@ function AreaPicker({
   selected,
   proActive,
   lifetimeActive,
+  tokenRoundReady,
   onSelect,
 }: {
   selected: RideArea;
   proActive: boolean;
   lifetimeActive: boolean;
+  tokenRoundReady: boolean;
   onSelect: (area: RideArea) => void;
 }) {
   const areas = [
@@ -3170,9 +3235,9 @@ function AreaPicker({
     {
       id: "bikeLand" as RideArea,
       label: "E-Bike Land",
-      meta: lifetimeActive ? "Lifetime" : proActive ? "Unlocked" : "10s preview",
-      icon: proActive ? <Zap size={15} /> : <Lock size={15} />,
-      locked: !proActive,
+      meta: lifetimeActive ? "Lifetime" : proActive ? "Unlocked" : tokenRoundReady ? "Token round" : "10s preview",
+      icon: proActive || tokenRoundReady ? <Zap size={15} /> : <Lock size={15} />,
+      locked: !proActive && !tokenRoundReady,
     },
   ];
 
@@ -3557,25 +3622,26 @@ function ResultStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TokenGaragePanel({
+function AirdropAccessPanel({
   enabled,
   address,
-  onHolderChange,
+  access,
+  onAccessChange,
   onConnect,
-  onOpen,
+  onOpenTerms,
   onSelectTokenSkin,
 }: {
   enabled: boolean;
   address?: `0x${string}`;
-  onHolderChange: (holder: boolean) => void;
+  access: AirdropAccess;
+  onAccessChange: (access: AirdropAccess) => void;
   onConnect: () => void;
-  onOpen: (url: string) => void;
+  onOpenTerms: () => void;
   onSelectTokenSkin: () => void;
 }) {
   const chainId = useChainId();
   const { switchChain } = useSwitchChain();
   const tokenReady = ETH_ADDRESS_REGEX_CLIENT.test(EBIKE_TOKEN_ADDRESS);
-  const externalUrl = EBIKE_TOKEN_MARKET_URL || EBIKE_TOKEN_INFO_URL;
   const { data: balance, isLoading } = useReadContract({
     address: tokenReady ? EBIKE_TOKEN_ADDRESS : undefined,
     abi: USDC_ABI,
@@ -3585,11 +3651,16 @@ function TokenGaragePanel({
     query: { enabled: tokenReady && !!address },
   });
   const hasToken = typeof balance === "bigint" && balance > 0n;
-  const displayBalance = typeof balance === "bigint" ? formatUnits(balance, Number.isFinite(EBIKE_TOKEN_DECIMALS) ? EBIKE_TOKEN_DECIMALS : 18) : "0";
+  const decimals = Number.isFinite(EBIKE_TOKEN_DECIMALS) ? EBIKE_TOKEN_DECIMALS : 18;
+  const roundThreshold = parseUnits(AIRDROP_ROUND_TOKENS, decimals);
+  const dayThreshold = parseUnits(AIRDROP_DAY_PASS_TOKENS, decimals);
+  const hasRound = typeof balance === "bigint" && balance >= roundThreshold;
+  const hasDay = typeof balance === "bigint" && balance >= dayThreshold;
+  const displayBalance = typeof balance === "bigint" ? formatUnits(balance, decimals) : "0";
 
   useEffect(() => {
-    onHolderChange(hasToken);
-  }, [hasToken, onHolderChange]);
+    onAccessChange({ holder: hasToken, round: hasRound, day: hasDay, balanceLabel: displayBalance });
+  }, [displayBalance, hasDay, hasRound, hasToken, onAccessChange]);
 
   const primaryAction = () => {
     if (!enabled) {
@@ -3604,7 +3675,7 @@ function TokenGaragePanel({
       onSelectTokenSkin();
       return;
     }
-    if (externalUrl) onOpen(externalUrl);
+    onOpenTerms();
   };
 
   return (
@@ -3613,24 +3684,24 @@ function TokenGaragePanel({
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#35f6c8]">
             <Zap size={13} />
-            Token Garage
+            Airdrop Access
           </div>
-          <div className="mt-1 text-lg font-black leading-tight text-white">{EBIKE_TOKEN_SYMBOL} holder perks</div>
+          <div className="mt-1 text-lg font-black leading-tight text-white">{EBIKE_TOKEN_SYMBOL} in-game token</div>
           <div className="mt-1 text-xs font-semibold leading-5 text-white/60">
-            Optional wallet-read cosmetics only. No buy prompt, custody, swap, staking, or price promise.
+            Free follower drop for play access only. Do not buy it. No custody, swap, resale, or cash value.
           </div>
         </div>
-        <div className={`shrink-0 rounded-md border px-2 py-1 text-right ${hasToken ? "border-[#a2ff9a]/45 bg-[#a2ff9a]/14" : "border-white/12 bg-white/8"}`}>
-          <div className={`text-[9px] font-black uppercase tracking-[0.1em] ${hasToken ? "text-[#a2ff9a]" : "text-white/42"}`}>{hasToken ? "holder" : "status"}</div>
-          <div className="text-sm font-black text-white">{tokenReady ? isLoading ? "..." : hasToken ? "Active" : "Read" : "Off"}</div>
+        <div className={`shrink-0 rounded-md border px-2 py-1 text-right ${hasDay ? "border-[#a2ff9a]/45 bg-[#a2ff9a]/14" : hasRound ? "border-[#fbe764]/45 bg-[#fbe764]/14" : "border-white/12 bg-white/8"}`}>
+          <div className={`text-[9px] font-black uppercase tracking-[0.1em] ${hasDay ? "text-[#a2ff9a]" : hasRound ? "text-[#fbe764]" : "text-white/42"}`}>{hasDay ? "day pass" : hasRound ? "round" : "status"}</div>
+          <div className="text-sm font-black text-white">{tokenReady ? isLoading ? "..." : hasDay ? "Active" : hasRound ? "Ready" : "Read" : "Off"}</div>
         </div>
       </div>
 
       <div className="mt-3 grid grid-cols-3 gap-1.5">
         {[
-          ["Badge", "Profile flair"],
-          ["Decal", "Garage plate"],
-          ["Skin", "Token Rider"],
+          [AIRDROP_ROUND_TOKENS, "daily round"],
+          [AIRDROP_DAY_PASS_TOKENS, "day pass"],
+          ["Skin", "Airdrop Rider"],
         ].map(([title, detail]) => (
           <div key={title} className="rounded-md border border-white/10 bg-black/16 px-2 py-2">
             <div className="text-[10px] font-black text-white">{title}</div>
@@ -3646,16 +3717,19 @@ function TokenGaragePanel({
         </div>
         <button
           className="inline-flex min-h-9 shrink-0 items-center justify-center gap-1 rounded-md bg-[#35f6c8] px-3 text-[10px] font-black uppercase text-[#071018] disabled:opacity-60"
-          disabled={!tokenReady || (enabled && !hasToken && !externalUrl)}
+          disabled={!tokenReady}
           onClick={primaryAction}
         >
-          {!tokenReady ? "Configure" : !enabled ? "Connect" : chainId !== BASE_CHAIN_ID ? "Base" : hasToken ? "Equip" : externalUrl ? "Open" : "Info"}
-          <ExternalLink size={12} />
+          {!tokenReady ? "Configure" : !enabled ? "Connect" : chainId !== BASE_CHAIN_ID ? "Base" : hasToken ? "Equip" : "Terms"}
+          {hasToken ? <Bike size={12} /> : <ExternalLink size={12} />}
         </button>
       </div>
 
       <div className="mt-2 rounded-md border border-[#fbe764]/18 bg-[#fbe764]/8 px-3 py-2 text-[10px] font-semibold leading-4 text-white/58">
-        Not investment, legal, tax, or purchase advice. CasterCycle does not endorse buying tokens, sell tokens, custody assets, guarantee liquidity, or give tokens cash value.
+        {access.day ? "Day pass is active while this connected wallet holds the threshold balance." : access.round ? "Daily airdrop round is ready. It is not burned or spent." : "No token? Ask a friend or the CasterCycle community for a free play drop if extras are available."} Not investment, tax, or purchase advice.
+      </div>
+      <div className="mt-2 rounded-md border border-[#35f6c8]/18 bg-[#35f6c8]/8 px-3 py-2 text-[10px] font-semibold leading-4 text-white/54">
+        This token is for onchain game access and social fun only. It is not sold by CasterCycle, not required for free play, and not promised to have price, liquidity, redemption, or future benefits.
       </div>
       {tokenReady && (
         <button
@@ -4632,6 +4706,7 @@ function PassCompareGrid({
 function UpgradePanel({
   enabled,
   isPro,
+  tokenDayActive,
   dayActive,
   annualActive,
   urgent,
@@ -4642,6 +4717,7 @@ function UpgradePanel({
 }: {
   enabled: boolean;
   isPro: boolean;
+  tokenDayActive: boolean;
   dayActive: boolean;
   annualActive: boolean;
   urgent: boolean;
@@ -4675,7 +4751,7 @@ function UpgradePanel({
   const hasEnough = typeof balance === "bigint" && balance >= price;
   const busy = buying || sendingEth || confirmingEth || step !== "idle";
   const treasuryReady = !!TREASURY_ADDRESS && ETH_ADDRESS_REGEX_CLIENT.test(TREASURY_ADDRESS);
-  const selectedPlanActive = plan === "day" ? dayActive : annualActive;
+  const selectedPlanActive = tokenDayActive || (plan === "day" ? dayActive : annualActive);
 
   useEffect(() => {
     if (bought && step === "buying") {
@@ -4749,10 +4825,10 @@ function UpgradePanel({
           >
             <Radio size={14} />
           </button>
-          {isPro && <div className="rounded bg-[#a2ff9a] px-2 py-1 text-[10px] font-black text-[#111923]">ACTIVE</div>}
+          {isPro && <div className="rounded bg-[#a2ff9a] px-2 py-1 text-[10px] font-black text-[#111923]">{tokenDayActive ? "AIRDROP" : "ACTIVE"}</div>}
         </div>
       </div>
-      <PassCompareGrid plan={plan} dayActive={dayActive} annualActive={annualActive} onPlan={setPlan} />
+      <PassCompareGrid plan={plan} dayActive={dayActive || tokenDayActive} annualActive={annualActive} onPlan={setPlan} />
       <div className="mt-3 rounded-md border border-[#ff7adf]/28 bg-[#ff7adf]/10 p-3">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
@@ -4899,9 +4975,9 @@ function LegalDisclosurePanel({ onOpenTerms }: { onOpenTerms: () => void }) {
       <div className="mt-2 grid grid-cols-2 gap-1.5">
         {[
           ["No advice", "No financial, tax, legal, safety, or purchase advice."],
-          ["No promise", "No token value, profit, liquidity, payout, or availability promise."],
+          ["No buying", "Do not buy the game token. Ask for a free drop if needed."],
           ["Your wallet", "You approve transactions, pay gas, manage taxes, and follow local rules."],
-          ["As-is play", "Game, scores, rewards, links, and content are provided as-is."],
+          ["No value", "No price, cash value, liquidity, redemption, or payout promise."],
         ].map(([title, detail]) => (
           <div key={title} className="rounded-md border border-white/10 bg-black/16 px-2 py-2">
             <div className="text-[9px] font-black uppercase tracking-[0.08em] text-white/46">{title}</div>
@@ -4910,7 +4986,7 @@ function LegalDisclosurePanel({ onOpenTerms }: { onOpenTerms: () => void }) {
         ))}
       </div>
       <div className="mt-2 text-[10px] font-semibold leading-4 text-white/52">
-        Token trophies are optional, owner-funded, skill-based, no-purchase-needed, and may be paused or corrected for abuse, errors, or legal/compliance reasons.
+        Airdrop access is optional: {AIRDROP_ROUND_TOKENS} {EBIKE_TOKEN_SYMBOL} may unlock a daily round and {AIRDROP_DAY_PASS_TOKENS} may unlock a day pass while held. No burn, spend, sale, or purchase required.
       </div>
     </div>
   );
@@ -4924,7 +5000,7 @@ function lanePoint(width: number, height: number, lane: number, progress: number
   return { x: width / 2 + lane * spread, y, scale: 0.25 + progress * 1.18 };
 }
 
-function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height: number, free: FreeRideModel, skin: Skin, unlimited: boolean, now: number, preview = false) {
+function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height: number, free: FreeRideModel, skin: Skin, unlimited: boolean, now: number, preview = false, airdropRound = false) {
   ctx.save();
   const nextSpot = nextFreeRideSpot(free);
   const sky = ctx.createLinearGradient(0, 0, 0, height);
@@ -4955,7 +5031,7 @@ function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height:
   ctx.font = "900 10px system-ui, sans-serif";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  ctx.fillText(preview ? `${Math.ceil(free.remaining)}S E-BIKE LAND PREVIEW` : unlimited ? (free.area === "statePark" ? "STATE PARK UNLIMITED" : "UNLIMITED FREESTYLE") : `${Math.ceil(free.remaining)}S FREE RIDE`, 30, height * 0.13 + 19);
+  ctx.fillText(preview ? `${Math.ceil(free.remaining)}S E-BIKE LAND PREVIEW` : airdropRound ? `${Math.ceil(free.remaining)}S AIRDROP ROUND` : unlimited ? (free.area === "statePark" ? "STATE PARK UNLIMITED" : "UNLIMITED FREESTYLE") : `${Math.ceil(free.remaining)}S FREE RIDE`, 30, height * 0.13 + 19);
   ctx.fillStyle = "#ffffff";
   ctx.font = "900 16px system-ui, sans-serif";
   ctx.fillText(`${free.zone} - ${free.terrain}`, 30, height * 0.13 + 39);
