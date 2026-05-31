@@ -21,6 +21,7 @@ import {
   Target,
   Trophy,
   Users,
+  ExternalLink,
   Volume2,
   VolumeX,
   Wallet,
@@ -51,6 +52,12 @@ const STORAGE_PREFIX = "castercycle";
 const DAY_SECONDS = 24 * 60 * 60;
 const LIFETIME_SECONDS = 80 * 365 * 24 * 60 * 60;
 const FREE_ROAM_SECONDS = 30;
+const KINGBULL_AWIN_URL = "https://www.awin1.com/cread.php?awinmid=124136&awinaffid=2916043";
+const KINGBULL_DISCOVER_ST_URL = "https://www.kingbullbike.com/products/kingbull-discover-st2-0-premium-off-road-city-electric-bike";
+const KINGBULL_DISCOVER_ST_AWIN_URL = `${KINGBULL_AWIN_URL}&ued=${encodeURIComponent(KINGBULL_DISCOVER_ST_URL)}`;
+const KINGBULL_SOVRN_URL = "https://sovrn.co/0wdeadd";
+const KINGBULL_COUPON_CODE = process.env.NEXT_PUBLIC_KINGBULL_COUPON_CODE || "GET50OFF";
+const KINGBULL_REDDIT_SEARCH_URL = "https://www.reddit.com/r/ebikes/search/?q=kingbull%20ranger&restrict_sr=1";
 
 type RidePhase = "ready" | "riding" | "finished";
 type Lane = -1 | 0 | 1;
@@ -58,7 +65,7 @@ type EntityKind = "bolt" | "battery" | "ring" | "cone" | "pothole" | "barrier" |
 type LeaderboardScope = "global" | "friends";
 type LeaderboardPeriod = "daily" | "weekly";
 type LeaderboardMode = "dash" | "freestyle";
-type DashboardTab = "ride" | "shop" | "garage" | "club" | "leaders";
+type DashboardTab = "ride" | "shop" | "garage" | "club" | "leaders" | "quest";
 type RideArea = "park" | "statePark" | "bikeLand";
 type MissionKind = "combo" | "clean" | "boosts" | "battery" | "bolts";
 type SfxId = "start" | "lane" | "bolt" | "boost" | "hit" | "clear" | "finish" | "warning" | "near" | "combo";
@@ -280,6 +287,11 @@ type RideRecap = {
   routeName: string;
 };
 
+type RangerGuideMessage = {
+  role: "user" | "guide";
+  text: string;
+};
+
 const ROUTES: RouteTheme[] = [
   {
     name: "Community Park",
@@ -331,6 +343,121 @@ const SKINS: Skin[] = [
   { id: "forest", name: "Forest Cruiser", frame: "#9ff28a", battery: "#fbe764", trail: "#9ff28a", unlock: "base", label: "State Park" },
   { id: "neon", name: "Glow Track", frame: "#ff7adf", battery: "#7cf2ff", trail: "#ff7adf", unlock: "pro", label: "E-Bike Land" },
 ];
+
+const RANGER_STATS = [
+  { label: "Sale price", value: "$799", detail: "Listed sale signal. Verify at checkout." },
+  { label: "Coupon", value: "$50 off", detail: `Try code ${KINGBULL_COUPON_CODE} at checkout.` },
+  { label: "Top speed", value: "Up to 28 mph", detail: "Class 3 capable, check local rules." },
+  { label: "Range", value: "Up to 80 miles", detail: "Ideal conditions, rider/load dependent." },
+  { label: "Motor", value: "750W hub", detail: "1300W peak, 80 Nm listed torque." },
+  { label: "Battery", value: "48V 18Ah", detail: "864Wh lithium pack." },
+  { label: "Payload", value: "350 lb", detail: "Extended bench seat, two-rider capable." },
+  { label: "Weight", value: "88 lb", detail: "Moped-style fat tire build." },
+  { label: "Tires", value: "20 x 4.0 CST", detail: "Fat tires for mixed surfaces." },
+  { label: "Brakes", value: "Hydraulic", detail: "180mm rotors with motor cut-off levers." },
+];
+
+const RANGER_FUN_FACTS = [
+  "Moped-style frame and long bench seat make it feel more like a mini moto than a commuter bike.",
+  "The 864Wh battery is the big range story: more watt-hours usually means more room for long rides.",
+  "20 x 4.0 fat tires add comfort and grip, but they also make tire pressure matter a lot.",
+  "Hydraulic brakes are a major plus on an 88 lb e-bike with a 350 lb payload rating.",
+  "A 750W hub motor with 1300W peak is the sweet spot many riders look for on a value fat-tire e-bike.",
+  "Turn signals, brake light behavior, and a color display make it feel more complete for street riding.",
+];
+
+const RANGER_VIDEOS = [
+  {
+    id: "KIY9w0HD4_M",
+    title: "Kingbull Ranger feature video",
+    channel: "YouTube",
+  },
+  {
+    id: "8q_OuQEwmhM",
+    title: "Kingbull Ranger ride/review video",
+    channel: "YouTube",
+  },
+  {
+    id: "_rFuAleokbA",
+    title: "Kingbull Ranger owner video",
+    channel: "YouTube",
+  },
+  {
+    id: "BcMQ5wPmjZ8",
+    title: "Kingbull Ranger closer look",
+    channel: "YouTube",
+  },
+  {
+    id: "cQ8uWDjUbbM",
+    title: "Kingbull Ranger riding clip",
+    channel: "YouTube",
+  },
+  {
+    id: "PhJJ3qPq-Qg",
+    title: "Kingbull Ranger video",
+    channel: "YouTube",
+  },
+  {
+    id: "MezigbswD8o",
+    title: "Kingbull Ranger extra video",
+    channel: "YouTube",
+  },
+];
+
+const RANGER_SHORTS = [
+  {
+    id: "BLgRulKFLDs",
+    title: "Ranger short clip",
+  },
+  {
+    id: "s9wduz319OI",
+    title: "Ranger quick look",
+  },
+  {
+    id: "GMz9eHBTM30",
+    title: "Ranger short ride",
+  },
+  {
+    id: "ZxzK8xnXn2A",
+    title: "Ranger short feature",
+  },
+  {
+    id: "9nv-K0AjXGc",
+    title: "Ranger short",
+  },
+];
+
+function rangerGuideAnswer(input: string) {
+  const text = input.toLowerCase();
+  if (text.includes("price") || text.includes("deal") || text.includes("buy") || text.includes("sale") || text.includes("coupon")) {
+    return `The current fan-page deal callout is $799, plus a $50 off coupon code: ${KINGBULL_COUPON_CODE}. Use Buy Ranger or Deals for the affiliate promo link, and verify final price at checkout.`;
+  }
+  if (text.includes("range") || text.includes("battery") || text.includes("mile")) {
+    return "Ranger is listed with a 48V 18Ah battery, 864Wh total capacity, and up to 80 miles under ideal conditions. Real range changes with speed, rider weight, hills, tire pressure, wind, cargo, and throttle use.";
+  }
+  if (text.includes("speed") || text.includes("class") || text.includes("legal") || text.includes("law")) {
+    return "The Ranger is listed up to 28 mph, which is Class 3 territory in many US areas. E-bike laws vary by state, city, trail, and path, so check local rules before riding fast or using throttle.";
+  }
+  if (text.includes("motor") || text.includes("torque") || text.includes("hill")) {
+    return "The listed motor is a 750W brushless rear hub with 1300W peak and 80 Nm torque. That is a strong setup for a moped-style fat tire e-bike, but steep hills and heavy payloads still reduce speed and range.";
+  }
+  if (text.includes("weight") || text.includes("carry") || text.includes("payload") || text.includes("two")) {
+    return "Ranger is listed around 88 lb with a 350 lb max payload and an extended bench seat. It is more moped-style than lightweight bicycle, so plan storage, stairs, racks, and transport carefully.";
+  }
+  if (text.includes("brake") || text.includes("safety") || text.includes("helmet")) {
+    return "The listed brakes are dual hydraulic discs with 180mm rotors and motor cut-off levers. Wear a helmet, test brakes before rides, and treat 20x4 fat tires plus moped weight with respect.";
+  }
+  if (text.includes("tire") || text.includes("suspension") || text.includes("comfort")) {
+    return "Ranger is listed with CST 20 x 4.0 fat tires, a dual-crown front fork, and a rear spring shock. That points toward comfort and mixed-surface stability, not nimble lightweight handling.";
+  }
+  if (text.includes("video") || text.includes("review") || text.includes("youtube") || text.includes("short")) {
+    return "Scroll the Quest tab for long videos and Shorts. If an embed is blocked by an in-app browser, use the Open button to launch YouTube directly.";
+  }
+  if (text.includes("affiliate") || text.includes("official") || text.includes("fan")) {
+    return "This is an unaffiliated CasterCycle fan page. Promo buttons may be affiliate links. Specs and availability can change, so verify important details with Kingbull before buying.";
+  }
+  return "Ask about range, speed, motor, battery, brakes, payload, laws, videos, or deals. I will keep it practical and remind you what to verify before buying or riding.";
+}
 
 const DAILY_MISSIONS: DailyMission[] = [
   { kind: "combo", title: "Flow Thread", goal: "Reach a 10x combo", target: 10, reward: 700 },
@@ -1568,6 +1695,14 @@ export default function CasterCycleApp() {
     if (connector) connect({ connector });
   }, [connect, connectors]);
 
+  const openExternal = useCallback(async (url: string) => {
+    try {
+      await sdk.actions.openUrl(url);
+    } catch {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  }, []);
+
   const unlockEthSupporter = useCallback(() => {
     setEthSupporter(true);
     try {
@@ -2200,7 +2335,7 @@ export default function CasterCycleApp() {
                 <div className="flex items-center justify-between gap-3 rounded-md border border-white/8 bg-white/[0.04] p-3">
                   <div className="min-w-0">
                     <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[#7cf2ff]">{resultLabel}</div>
-                    <h1 className="mt-1 truncate text-2xl font-black leading-none tracking-normal text-white">{dashboardTab === "ride" ? "Play" : dashboardTab === "shop" ? "Pass" : dashboardTab === "garage" ? "Garage" : dashboardTab === "club" ? "Club" : "Rank"}</h1>
+                    <h1 className="mt-1 truncate text-2xl font-black leading-none tracking-normal text-white">{dashboardTab === "ride" ? "Play" : dashboardTab === "shop" ? "Pass" : dashboardTab === "garage" ? "Garage" : dashboardTab === "club" ? "Club" : dashboardTab === "quest" ? "Quest" : "Rank"}</h1>
                     <p className="mt-1 truncate text-sm font-medium leading-5 text-white/64">
                       {hud.phase === "finished" ? `${hud.score.toLocaleString()} on ${game.route.name}` : `${game.route.name} - ${displayName}`}
                     </p>
@@ -2216,12 +2351,13 @@ export default function CasterCycleApp() {
                   </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-5 gap-1 rounded-md border border-white/10 bg-[#02070c]/55 p-1 shadow-inner">
+                <div className="mt-3 grid grid-cols-6 gap-1 rounded-md border border-white/10 bg-[#02070c]/55 p-1 shadow-inner">
                   {([
                     { id: "ride", label: "Play", icon: <Play size={15} /> },
                     { id: "shop", label: "Pass", icon: <Wallet size={15} /> },
-                    { id: "garage", label: "Garage", icon: <Bike size={15} /> },
+                    { id: "garage", label: "Bike", icon: <Bike size={15} /> },
                     { id: "club", label: "Club", icon: <Users size={15} /> },
+                    { id: "quest", label: "Quest", icon: <Sparkles size={15} /> },
                     { id: "leaders", label: "Rank", icon: <Trophy size={15} /> },
                   ] as { id: DashboardTab; label: string; icon: React.ReactNode }[]).map((item) => (
                     <button
@@ -2339,6 +2475,10 @@ export default function CasterCycleApp() {
 
                 {dashboardTab === "club" && (
                   <LoungePanel proActive={effectivePro} user={user ?? undefined} />
+                )}
+
+                {dashboardTab === "quest" && (
+                  <RangerFanQuest onOpen={openExternal} onShare={shareApp} />
                 )}
 
                 {dashboardTab === "leaders" && (
@@ -3605,6 +3745,369 @@ function LoungePanel({ proActive, user }: { proActive: boolean; user?: { fid?: n
       <div className="mt-1 flex justify-between text-[10px] font-bold uppercase tracking-[0.08em] text-white/38">
         <span>{status || "No links. Keep it clean."}</span>
         <span>{draft.length}/100</span>
+      </div>
+    </div>
+  );
+}
+
+function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; onShare: () => void }) {
+  const [showHappyVideo, setShowHappyVideo] = useState(false);
+  const [guideDraft, setGuideDraft] = useState("");
+  const [guideMessages, setGuideMessages] = useState<RangerGuideMessage[]>([
+    {
+      role: "guide",
+      text: "Ask me about Ranger range, speed, motor, payload, brakes, local rules, videos, or current deals.",
+    },
+  ]);
+
+  const askGuide = (raw: string) => {
+    const question = raw.replace(/https?:\/\/\S+|www\.\S+/gi, "").replace(/\s+/g, " ").trim().slice(0, 120);
+    if (!question) return;
+    setGuideMessages((messages) => [...messages.slice(-5), { role: "user", text: question }, { role: "guide", text: rangerGuideAnswer(question) }]);
+    setGuideDraft("");
+  };
+
+  return (
+    <div className="mt-4">
+      <button
+        className="mb-3 flex min-h-10 w-full items-center overflow-hidden rounded-md border border-[#fbe764]/35 bg-[#fbe764]/12 text-left active:scale-[0.99]"
+        onClick={() => onOpen(KINGBULL_SOVRN_URL)}
+      >
+        <span className="shrink-0 border-r border-[#fbe764]/25 px-3 text-[10px] font-black uppercase tracking-[0.12em] text-[#fbe764]">ad</span>
+        <span className="relative flex-1 overflow-hidden py-2">
+          <span className="block animate-[marquee_12s_linear_infinite] whitespace-nowrap text-xs font-black uppercase tracking-[0.08em] text-white">
+            Kingbull Ranger deal - $799 sale - try {KINGBULL_COUPON_CODE} for $50 off - tap to buy
+          </span>
+        </span>
+      </button>
+
+      <div className="rounded-md border border-[#fbe764]/28 bg-[linear-gradient(135deg,rgba(251,231,100,0.12),rgba(124,242,255,0.08)_55%,rgba(255,122,223,0.08))] p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#fbe764]">
+              <Sparkles size={13} />
+              side quest
+            </div>
+            <div className="mt-1 text-xl font-black leading-tight text-white">Kingbull Ranger Fan Garage</div>
+            <div className="mt-1 text-xs font-semibold leading-5 text-white/62">
+              A CasterCycle fan info page for a vintage/moped-style e-bike. Not affiliated with or endorsed by Kingbull.
+            </div>
+          </div>
+          <div className="shrink-0 rounded-md border border-[#7cf2ff]/28 bg-[#7cf2ff]/10 px-2 py-1 text-right">
+            <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#7cf2ff]">fan</div>
+            <div className="text-sm font-black text-white">Ranger</div>
+          </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <button className="min-h-10 rounded-md bg-[#fbe764] px-2 text-[10px] font-black uppercase text-[#071018]" onClick={() => onOpen(KINGBULL_AWIN_URL)}>
+            Buy Ranger
+          </button>
+          <button className="min-h-10 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/14 px-2 text-[10px] font-black uppercase text-white" onClick={() => onOpen(KINGBULL_AWIN_URL)}>
+            Deals
+          </button>
+          <button className="min-h-10 rounded-md border border-white/12 bg-white/8 px-2 text-[10px] font-black uppercase text-white/76" onClick={onShare}>
+            Share
+          </button>
+        </div>
+        <button
+          className="mt-2 flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-[#ff9ec7]/35 bg-[#ff9ec7]/12 px-3 text-left active:scale-[0.99]"
+          onClick={() => setShowHappyVideo(true)}
+        >
+          <span className="min-w-0">
+            <span className="block text-[9px] font-black uppercase tracking-[0.14em] text-[#ffb7d4]">happy popup</span>
+            <span className="block truncate text-sm font-black text-white">Watch until the end</span>
+          </span>
+          <Play size={17} className="shrink-0 text-[#fbe764]" />
+        </button>
+      </div>
+
+      <div className="mt-3 rounded-md border border-[#fbe764]/35 bg-[#fbe764]/12 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#fbe764]">
+              <Crown size={13} />
+              Ranger deal
+            </div>
+            <div className="mt-1 text-2xl font-black leading-none text-white">$799 sale</div>
+            <div className="mt-1 text-xs font-semibold leading-5 text-white/62">Use coupon for another $50 off when eligible.</div>
+          </div>
+          <div className="shrink-0 rounded-md border border-[#a2ff9a]/35 bg-[#a2ff9a]/12 px-3 py-2 text-center">
+            <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#a2ff9a]">code</div>
+            <div className="mt-1 text-sm font-black text-white">{KINGBULL_COUPON_CODE}</div>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button className="min-h-10 rounded-md bg-[#fbe764] px-3 text-xs font-black uppercase text-[#071018]" onClick={() => onOpen(KINGBULL_AWIN_URL)}>
+            Buy with deal
+          </button>
+          <button
+            className="min-h-10 rounded-md border border-white/12 bg-white/8 px-3 text-xs font-black uppercase text-white/72"
+            onClick={() => {
+              navigator.clipboard?.writeText(KINGBULL_COUPON_CODE).catch(() => {});
+            }}
+          >
+            Copy code
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-md border border-[#7cf2ff]/30 bg-[#7cf2ff]/10 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#7cf2ff]">
+              <Bike size={13} />
+              suggested
+            </div>
+            <div className="mt-1 text-lg font-black leading-tight text-white">Kingbull Discover ST 2.0</div>
+            <div className="mt-1 text-xs font-semibold leading-5 text-white/62">
+              Premium off-road/city e-bike option to compare with the Ranger.
+            </div>
+          </div>
+          <div className="shrink-0 rounded-md border border-white/12 bg-white/8 px-2 py-1 text-right">
+            <div className="text-[9px] font-black uppercase tracking-[0.1em] text-white/42">link</div>
+            <div className="text-sm font-black text-white">ST 2.0</div>
+          </div>
+        </div>
+        <button
+          className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-3 text-xs font-black uppercase text-[#071018] active:scale-[0.98]"
+          onClick={() => onOpen(KINGBULL_DISCOVER_ST_AWIN_URL)}
+        >
+          View with affiliate link
+          <ExternalLink size={13} />
+        </button>
+      </div>
+
+      {showHappyVideo && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/72 p-4 backdrop-blur-md">
+          <div className="w-full max-w-[480px] overflow-hidden rounded-md border border-[#fbe764]/35 bg-[#071018] shadow-[0_24px_80px_rgba(0,0,0,0.55)]">
+            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-3 py-2">
+              <div className="min-w-0">
+                <div className="text-[10px] font-black uppercase tracking-[0.16em] text-[#fbe764]">happy video</div>
+                <div className="truncate text-sm font-black text-white">Watch until the end</div>
+              </div>
+              <button
+                className="min-h-9 rounded-md border border-white/12 bg-white/8 px-3 text-[10px] font-black uppercase text-white/72"
+                onClick={() => setShowHappyVideo(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="aspect-video bg-black">
+              <iframe
+                className="h-full w-full"
+                src="https://www.youtube-nocookie.com/embed/7u2pJWIHby8?rel=0&modestbranding=1&playsinline=1"
+                title="Happy CasterCycle video"
+                loading="lazy"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                allowFullScreen
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2 p-3">
+              <button className="min-h-10 rounded-md bg-[#fbe764] px-3 text-xs font-black uppercase text-[#071018]" onClick={() => onOpen("https://www.youtube.com/watch?v=7u2pJWIHby8")}>
+                Open YouTube
+              </button>
+              <button className="min-h-10 rounded-md border border-white/12 bg-white/8 px-3 text-xs font-black uppercase text-white/72" onClick={() => setShowHappyVideo(false)}>
+                Back to quest
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-3 rounded-md border border-[#7cf2ff]/24 bg-[#7cf2ff]/10 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#7cf2ff]">
+            <Radio size={13} />
+            ranger fan chat
+          </div>
+          <div className="rounded bg-white/10 px-2 py-1 text-[9px] font-black uppercase text-white/50">local guide</div>
+        </div>
+        <div className="mt-2 max-h-44 overflow-y-auto rounded-md border border-white/10 bg-black/18 p-2">
+          {guideMessages.map((message, index) => (
+            <div
+              key={`${message.role}-${index}`}
+              className={`mb-2 max-w-[92%] rounded-md px-2 py-1.5 text-xs font-semibold leading-4 last:mb-0 ${
+                message.role === "guide" ? "bg-white/9 text-white/72" : "ml-auto bg-[#fbe764] text-[#071018]"
+              }`}
+            >
+              {message.text}
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 grid grid-cols-3 gap-1.5">
+          {["Range?", "Class 3?", "Best deal?"].map((prompt) => (
+            <button
+              key={prompt}
+              className="min-h-8 rounded-md border border-white/12 bg-white/8 px-2 text-[9px] font-black uppercase text-white/68"
+              onClick={() => askGuide(prompt)}
+            >
+              {prompt}
+            </button>
+          ))}
+        </div>
+        <div className="mt-2 flex gap-2">
+          <input
+            value={guideDraft}
+            maxLength={120}
+            placeholder="Ask Ranger info..."
+            className="min-h-10 min-w-0 flex-1 rounded-md border border-white/12 bg-black/24 px-3 text-sm font-semibold text-white outline-none placeholder:text-white/32"
+            onChange={(event) => setGuideDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") askGuide(guideDraft);
+            }}
+          />
+          <button className="rounded-md bg-[#fbe764] px-3 text-xs font-black text-[#071018]" onClick={() => askGuide(guideDraft)}>
+            Ask
+          </button>
+        </div>
+        <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.08em] text-white/38">
+          Fan info only. Verify official specs and local laws.
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        {RANGER_STATS.map((stat) => (
+          <div key={stat.label} className="rounded-md border border-white/10 bg-white/[0.05] p-2">
+            <div className="text-[9px] font-black uppercase tracking-[0.12em] text-white/42">{stat.label}</div>
+            <div className="mt-1 text-sm font-black text-white">{stat.value}</div>
+            <div className="mt-1 text-[10px] font-semibold leading-4 text-white/48">{stat.detail}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 rounded-md border border-white/10 bg-white/[0.04] p-3">
+        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/46">
+          <Sparkles size={13} />
+          why riders like it
+        </div>
+        <div className="mt-2 space-y-2">
+          {RANGER_FUN_FACTS.map((fact) => (
+            <div key={fact} className="rounded-md border border-white/8 bg-black/18 px-3 py-2 text-xs font-semibold leading-5 text-white/66">
+              {fact}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-md border border-white/10 bg-[#02070c]/42 p-2">
+        <div className="mb-2 flex items-center justify-between gap-2 px-1">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/46">
+            <Play size={12} />
+            watch in app
+          </div>
+          <button className="inline-flex items-center gap-1 text-[10px] font-black uppercase text-[#7cf2ff]" onClick={() => onOpen("https://www.youtube.com/results?search_query=Kingbull+Ranger+ebike+review")}>
+            More <ExternalLink size={11} />
+          </button>
+        </div>
+        <div className="space-y-2">
+          {RANGER_VIDEOS.map((video) => (
+            <div key={video.id} className="overflow-hidden rounded-md border border-white/10 bg-black/24">
+              <div className="aspect-video w-full bg-black">
+                <iframe
+                  className="h-full w-full"
+                  src={`https://www.youtube-nocookie.com/embed/${video.id}?rel=0&modestbranding=1&playsinline=1`}
+                  title={video.title}
+                  loading="lazy"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2 px-2 py-2">
+                <div className="min-w-0">
+                  <div className="truncate text-xs font-black text-white">{video.title}</div>
+                  <div className="truncate text-[10px] font-bold uppercase tracking-[0.08em] text-white/40">{video.channel}</div>
+                </div>
+                <button className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-md border border-white/12 bg-white/8 px-2 text-[9px] font-black uppercase text-white/70" onClick={() => onOpen(`https://www.youtube.com/watch?v=${video.id}`)}>
+                  Open <ExternalLink size={10} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-md border border-white/10 bg-[#02070c]/42 p-2">
+        <div className="mb-2 flex items-center justify-between gap-2 px-1">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/46">
+            <Sparkles size={12} />
+            shorts
+          </div>
+          <button className="inline-flex items-center gap-1 text-[10px] font-black uppercase text-[#7cf2ff]" onClick={() => onOpen("https://www.youtube.com/results?search_query=Kingbull+Ranger+shorts")}>
+            More <ExternalLink size={11} />
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {RANGER_SHORTS.map((video) => (
+            <div key={video.id} className="overflow-hidden rounded-md border border-white/10 bg-black/24">
+              <div className="aspect-[9/16] w-full bg-black">
+                <iframe
+                  className="h-full w-full"
+                  src={`https://www.youtube-nocookie.com/embed/${video.id}?rel=0&modestbranding=1&playsinline=1`}
+                  title={video.title}
+                  loading="lazy"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                />
+              </div>
+              <div className="flex items-center justify-between gap-2 px-2 py-2">
+                <div className="min-w-0 truncate text-[10px] font-black text-white">{video.title}</div>
+                <button className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-white/12 bg-white/8 px-2 text-[8px] font-black uppercase text-white/70" onClick={() => onOpen(`https://www.youtube.com/shorts/${video.id}`)}>
+                  Open
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button className="min-h-11 rounded-md border border-white/12 bg-white/8 px-3 text-left active:scale-[0.98]" onClick={() => onOpen(KINGBULL_AWIN_URL)}>
+          <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-[#7cf2ff]">affiliate</span>
+          <span className="mt-1 block text-xs font-black text-white">Promo link</span>
+        </button>
+        <button className="min-h-11 rounded-md border border-white/12 bg-white/8 px-3 text-left active:scale-[0.98]" onClick={() => onOpen(KINGBULL_REDDIT_SEARCH_URL)}>
+          <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-[#fbe764]">community</span>
+          <span className="mt-1 block text-xs font-black text-white">Reddit search</span>
+        </button>
+      </div>
+
+      <div className="mt-3 rounded-md border border-[#fbe764]/24 bg-[#fbe764]/10 p-3">
+        <div className="flex items-start gap-3">
+          <Image
+            src="/media/awin-qrcode.png"
+            alt="Kingbull affiliate promo QR code"
+            width={96}
+            height={96}
+            className="h-24 w-24 shrink-0 rounded-md border border-white/18 bg-white object-cover"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#fbe764]">
+              <ExternalLink size={13} />
+              scan promo qr
+            </div>
+            <div className="mt-1 text-sm font-black text-white">Kingbull Ranger deal link</div>
+            <div className="mt-1 text-[11px] font-semibold leading-4 text-white/58">
+              Use the QR or button for the same affiliate promo path.
+            </div>
+            <button
+              className="mt-2 min-h-9 rounded-md bg-[#fbe764] px-3 text-[10px] font-black uppercase text-[#071018]"
+              onClick={() => onOpen(KINGBULL_AWIN_URL)}
+            >
+              Open promo
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-md border border-[#ff5d73]/24 bg-[#ff5d73]/10 p-3">
+        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#ff9aac]">
+          <ShieldCheck size={13} />
+          fan page note
+        </div>
+        <div className="mt-1 text-[11px] font-semibold leading-4 text-white/60">
+          Specs, prices, promotions, laws, and availability can change. Promo links may be affiliate links. Verify with Kingbull and your local e-bike rules before buying or riding. This is not legal, safety, or purchase advice.
+        </div>
       </div>
     </div>
   );
