@@ -1482,7 +1482,7 @@ export default function CasterCycleApp() {
 
                 <div className="mt-4 grid grid-cols-5 gap-1 rounded-md border border-white/10 bg-black/18 p-1">
                   {([
-                    { id: "ride", label: "Ride", icon: <Map size={15} /> },
+                    { id: "ride", label: "Worlds", icon: <Map size={15} /> },
                     { id: "shop", label: "Shop", icon: <Wallet size={15} /> },
                     { id: "garage", label: "Bike", icon: <Bike size={15} /> },
                     { id: "club", label: "Club", icon: <Users size={15} /> },
@@ -1506,33 +1506,22 @@ export default function CasterCycleApp() {
 
                 {dashboardTab === "ride" && (
                   <>
-                    <div className="mt-4 grid grid-cols-3 gap-2">
-                      <ResultStat label="today" value={Math.max(stats.bestToday, hud.score).toLocaleString()} />
-                      <ResultStat label="best" value={Math.max(stats.bestAll, hud.score).toLocaleString()} />
-                      <ResultStat label="streak" value={String(stats.streak)} />
-                    </div>
-
-                    <AreaPicker selected={rideArea} proActive={effectivePro} lifetimeActive={annualActive} onSelect={chooseRideArea} />
+                    <WorldHub
+                      selected={rideArea}
+                      phase={hud.phase}
+                      score={hud.score}
+                      bestToday={Math.max(stats.bestToday, hud.score)}
+                      bestAll={Math.max(stats.bestAll, hud.score)}
+                      streak={stats.streak}
+                      proActive={effectivePro}
+                      lifetimeActive={annualActive}
+                      sharing={sharing}
+                      onSelect={chooseRideArea}
+                      onStart={startRide}
+                      onShare={hud.phase === "finished" ? shareRide : shareApp}
+                    />
 
                     <MissionPanel mission={game.mission} status={mission} />
-
-                    <div className="mt-4 grid grid-cols-2 gap-2">
-                      <button
-                        className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#fbe764] px-4 text-sm font-black text-[#111923] transition active:scale-[0.98]"
-                        onClick={startRide}
-                      >
-                        {hud.phase === "finished" ? <RotateCcw size={18} /> : <Play size={18} />}
-                        {hud.phase === "finished" ? "Ride Again" : "Ride Today"}
-                      </button>
-                      <button
-                        className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-4 text-sm font-black text-[#111923] transition active:scale-[0.98] disabled:opacity-70"
-                        disabled={sharing}
-                        onClick={hud.phase === "finished" ? shareRide : shareApp}
-                      >
-                        <Share2 size={18} />
-                        {sharing ? "Opening" : hud.phase === "finished" ? "Share" : "Invite"}
-                      </button>
-                    </div>
 
                     <div className="mt-3 grid grid-cols-3 gap-2">
                       <SignalChip icon={<Users size={13} />} label="rider" value={displayName} />
@@ -1841,6 +1830,187 @@ function WelcomeBackPanel({
         Not now
       </button>
     </div>
+  );
+}
+
+function WorldHub({
+  selected,
+  phase,
+  score,
+  bestToday,
+  bestAll,
+  streak,
+  proActive,
+  lifetimeActive,
+  sharing,
+  onSelect,
+  onStart,
+  onShare,
+}: {
+  selected: RideArea;
+  phase: RidePhase;
+  score: number;
+  bestToday: number;
+  bestAll: number;
+  streak: number;
+  proActive: boolean;
+  lifetimeActive: boolean;
+  sharing: boolean;
+  onSelect: (area: RideArea) => void;
+  onStart: () => void;
+  onShare: () => void;
+}) {
+  const worldMeta: Record<RideArea, { kicker: string; badge: string; access: string; feature: string; lockText: string }> = {
+    park: {
+      kicker: "Free roam",
+      badge: "Open",
+      access: "Community",
+      feature: "Skatepark, courts, fields, streams, and open paths.",
+      lockText: "Open",
+    },
+    statePark: {
+      kicker: "Adventure",
+      badge: "$0.99 week",
+      access: proActive ? "Unlocked" : "Cycle Pass",
+      feature: "Forest loops, stream bridges, hill descents, and longer lines.",
+      lockText: "Unlock",
+    },
+    bikeLand: {
+      kicker: "Premium",
+      badge: "$7 lifetime",
+      access: lifetimeActive ? "Lifetime" : "Lifetime Pass",
+      feature: "Pump tracks, neon lanes, club drops, and future premium worlds.",
+      lockText: "Unlock",
+    },
+  };
+
+  const canRide = (area: RideArea) => area === "park" || (area === "statePark" && proActive) || (area === "bikeLand" && lifetimeActive);
+  const selectedRoute = routeForArea(selected);
+
+  return (
+    <div className="mt-4">
+      <div className="flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#7cf2ff]">Ride worlds</div>
+          <div className="mt-1 truncate text-xl font-black leading-tight text-white">{selectedRoute.name}</div>
+          <div className="mt-1 truncate text-xs font-semibold text-white/54">{selectedRoute.tagline}</div>
+        </div>
+        <div className="shrink-0 rounded-md border border-[#fbe764]/28 bg-[#fbe764]/12 px-2 py-1 text-right">
+          <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#fbe764]">score</div>
+          <div className="text-sm font-black text-white">{score.toLocaleString()}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-2">
+        <ResultStat label="today" value={bestToday.toLocaleString()} />
+        <ResultStat label="best" value={bestAll.toLocaleString()} />
+        <ResultStat label="streak" value={String(streak)} />
+      </div>
+
+      <div className="mt-3 grid gap-2">
+        {ROUTES.map((route) => {
+          const meta = worldMeta[route.area];
+          const active = selected === route.area;
+          const unlocked = canRide(route.area);
+          return (
+            <button
+              key={route.area}
+              className={`grid min-h-[112px] grid-cols-[112px_1fr] gap-3 rounded-md border p-2 text-left transition active:scale-[0.99] ${
+                active ? "border-[#fbe764]/72 bg-[#fbe764]/12" : "border-white/12 bg-white/7"
+              }`}
+              onClick={() => onSelect(route.area)}
+            >
+              <WorldPreview route={route} active={active} locked={!unlocked} />
+              <span className="flex min-w-0 flex-col justify-between py-1">
+                <span className="min-w-0">
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-[0.16em] text-[#7cf2ff]">{meta.kicker}</span>
+                    <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-black uppercase ${unlocked ? "bg-[#a2ff9a] text-[#111923]" : "bg-white/10 text-white/58"}`}>
+                      {unlocked ? meta.access : meta.badge}
+                    </span>
+                  </span>
+                  <span className="mt-1 block text-base font-black leading-tight text-white">{route.name}</span>
+                  <span className="mt-1 block text-xs font-semibold leading-4 text-white/56">{meta.feature}</span>
+                </span>
+                <span className="mt-2 flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.08em] text-white/44">
+                    {unlocked ? <CheckCircle2 size={12} /> : <Lock size={12} />}
+                    {unlocked ? (active ? "Selected" : "Tap to select") : meta.lockText}
+                  </span>
+                  {active && <span className="h-2.5 w-2.5 rounded-full bg-[#fbe764]" />}
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#fbe764] px-4 text-sm font-black text-[#111923] transition active:scale-[0.98]"
+          onClick={onStart}
+        >
+          {phase === "finished" ? <RotateCcw size={18} /> : <Play size={18} />}
+          {phase === "finished" ? "Ride Again" : "Start World"}
+        </button>
+        <button
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-4 text-sm font-black text-[#111923] transition active:scale-[0.98] disabled:opacity-70"
+          disabled={sharing}
+          onClick={onShare}
+        >
+          <Share2 size={18} />
+          {sharing ? "Opening" : phase === "finished" ? "Share" : "Invite"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function WorldPreview({ route, active, locked }: { route: RouteTheme; active: boolean; locked: boolean }) {
+  const park = route.area === "park";
+  const statePark = route.area === "statePark";
+
+  return (
+    <span
+      className="relative block h-full min-h-[96px] overflow-hidden rounded-md border"
+      style={{
+        borderColor: active ? route.accent : "rgba(255,255,255,0.14)",
+        background: `linear-gradient(180deg, ${route.skyTop}, ${route.skyBottom})`,
+      }}
+    >
+      <span className="absolute inset-x-0 bottom-0 h-[58%]" style={{ background: park ? "#4c8e48" : statePark ? "#2f6f50" : "#292a72" }} />
+      <span className="absolute left-[45%] top-[10%] h-[108%] w-7 -translate-x-1/2 rotate-[-10deg] rounded-full" style={{ background: route.road }} />
+      <span className="absolute left-[58%] top-[16%] h-[92%] w-5 -translate-x-1/2 rotate-[18deg] rounded-full opacity-70" style={{ background: route.roadEdge }} />
+      <span className="absolute bottom-5 left-4 h-8 w-10 rounded bg-[#3d7d42]">
+        <span className="absolute left-1 top-1 h-2 w-8 rounded bg-[#7cf2ff]/70" />
+        <span className="absolute bottom-1 left-1 h-2 w-8 rounded bg-[#fbe764]/70" />
+      </span>
+      <span className="absolute bottom-8 right-4 h-5 w-9 rounded-full border-2" style={{ borderColor: route.accent }} />
+      {park && (
+        <>
+          <span className="absolute bottom-4 right-7 h-7 w-7 rounded bg-[#cfd7d9] rotate-12" />
+          <span className="absolute bottom-12 left-8 h-5 w-8 rounded border border-white/70" />
+        </>
+      )}
+      {statePark && (
+        <>
+          <span className="absolute bottom-4 left-7 h-10 w-3 rounded-t-full bg-[#16452d]" />
+          <span className="absolute bottom-8 left-4 h-10 w-3 rounded-t-full bg-[#1b5a38]" />
+          <span className="absolute bottom-7 right-8 h-1.5 w-12 rotate-[-12deg] rounded bg-[#b88a4f]" />
+        </>
+      )}
+      {route.area === "bikeLand" && (
+        <>
+          <span className="absolute bottom-5 left-6 h-3 w-12 rounded-full bg-[#ff7adf]/80" />
+          <span className="absolute bottom-12 right-5 h-3 w-11 rounded-full bg-[#7cf2ff]/80" />
+          <span className="absolute right-4 top-5 h-8 w-8 rounded-full border-2 border-[#fbe764]" />
+        </>
+      )}
+      <span className="absolute bottom-8 left-[48%] h-5 w-8 -translate-x-1/2 -rotate-12 rounded-full border-2 border-[#111923] bg-[#fbe764]" />
+      <span className="absolute bottom-6 left-[43%] h-3 w-3 rounded-full border-2 border-[#111923] bg-white" />
+      <span className="absolute bottom-6 left-[56%] h-3 w-3 rounded-full border-2 border-[#111923] bg-white" />
+      {locked && <span className="absolute inset-0 flex items-center justify-center bg-black/42 text-white"><Lock size={24} /></span>}
+    </span>
   );
 }
 
