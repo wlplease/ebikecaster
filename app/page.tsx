@@ -257,6 +257,8 @@ type FreeRideModel = {
   lastBoostSpot: string | null;
   jumpLines: number;
   lastJumpLineDistance: number;
+  terrainFlow: number;
+  lastFlowTerrain: string;
   voiceCooldown: number;
   submitted: boolean;
   terrain: string;
@@ -515,6 +517,8 @@ const FREE_RIDE_SPOTS: readonly FreeRideSpot[] = [
   { name: "Dog Park", short: "Dog Run", x: 1040, y: -80, color: "#9ff28a", areas: ["park"] },
   { name: "Amphitheater", short: "Stage", x: -920, y: 760, color: "#c4b5fd", areas: ["park"] },
   { name: "Food Trucks", short: "Trucks", x: 420, y: 1120, color: "#ffcc66", areas: ["park"] },
+  { name: "River Market", short: "Market", x: -1660, y: 1460, color: "#f6b65b", areas: ["park"] },
+  { name: "Sunset Hill", short: "Sunset", x: 1680, y: 1480, color: "#ff9b6a", areas: ["park", "statePark"] },
   { name: "Pine Loop", short: "Pines", x: 80, y: -980, color: "#2e714d" },
   { name: "North Meadow", short: "Meadow", x: -1180, y: -1320, color: "#b7ef66" },
   { name: "Boardwalk", short: "Boards", x: -1280, y: 1040, color: "#c59a5d" },
@@ -525,11 +529,16 @@ const FREE_RIDE_SPOTS: readonly FreeRideSpot[] = [
   { name: "Cedar Bridge", short: "Bridge", x: 360, y: 250, color: "#c59a5d", areas: ["statePark"] },
   { name: "Lake Pier", short: "Pier", x: 1380, y: 20, color: "#7cf2ff", areas: ["statePark"] },
   { name: "Ridge Camp", short: "Camp", x: 780, y: -1220, color: "#fbe764", areas: ["statePark"] },
+  { name: "Fern Falls", short: "Falls", x: -1720, y: 260, color: "#7cf2ff", areas: ["statePark"] },
+  { name: "Switchback", short: "Switch", x: 1640, y: -1640, color: "#a2ff9a", areas: ["statePark"] },
   { name: "E-Bike Land", short: "Glow", x: 1010, y: -890, color: "#ff7adf", areas: ["bikeLand"] },
   { name: "Neon Tunnel", short: "Tunnel", x: -960, y: -760, color: "#7cf2ff", areas: ["bikeLand"] },
   { name: "Jump Yard", short: "Jumps", x: 1260, y: 1180, color: "#ff8b4a", areas: ["bikeLand"] },
   { name: "Charge Plaza", short: "Charge", x: -1180, y: 1180, color: "#fbe764", areas: ["bikeLand"] },
   { name: "Club Garage", short: "Garage", x: 1460, y: -320, color: "#c4b5fd", areas: ["bikeLand"] },
+  { name: "Volt Bowl", short: "Volt", x: -1680, y: -1520, color: "#35f6c8", areas: ["bikeLand"] },
+  { name: "Laser Pier", short: "Laser", x: 1720, y: 430, color: "#ff7adf", areas: ["bikeLand"] },
+  { name: "Skyline Ramp", short: "Skyline", x: 220, y: 1660, color: "#fbe764", areas: ["bikeLand"] },
   { name: "Trailhead", short: "Start", x: 0, y: 0, color: "#fbe764" },
 ] as const;
 
@@ -540,6 +549,9 @@ const FREE_RIDE_PATHS = [
   [[0, -1560], [0, -1180], [0, -620], [0, -60], [0, 700], [0, 1120], [-250, 1480]],
   [[-1540, -220], [-940, -180], [-420, -720], [120, -980], [680, -900], [1180, -1340]],
   [[-1320, 1060], [-760, 840], [-260, 1200], [360, 1160], [1040, 620], [1510, 220]],
+  [[-1820, 1480], [-1280, 1040], [-640, 980], [120, 1320], [880, 1540], [1740, 1460]],
+  [[-1760, 260], [-1180, -120], [-820, -680], [-420, -1280], [220, -1660], [900, -1540], [1680, -1640]],
+  [[-1680, -1520], [-960, -760], [-120, -560], [620, -240], [1460, -320], [1720, 430], [1260, 1180], [220, 1660]],
 ] as const;
 
 const STREAM_PATH = [
@@ -554,7 +566,7 @@ const STREAM_PATH = [
   [1580, -320],
 ] as const;
 
-const FREE_RIDE_WORLD_LIMIT = 1780;
+const FREE_RIDE_WORLD_LIMIT = 2100;
 
 function localDateKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -882,9 +894,17 @@ function freeRideTerrain(x: number, y: number, area: RideArea) {
   const tunnelDistance = Math.hypot(x + 960, y + 760);
   const chargeDistance = Math.hypot(x + 1180, y - 1180);
   const jumpDistance = Math.hypot(x - 1260, y - 1180);
+  const voltDistance = Math.hypot(x + 1680, y + 1520);
+  const skylineDistance = Math.hypot(x - 220, y - 1660);
+  const fallsDistance = Math.hypot(x + 1720, y - 260);
+  const switchbackDistance = Math.hypot(x - 1640, y + 1640);
   if (streamDistance < 54) return { label: "Stream", short: "water", drag: 54, score: 0.08, warning: true };
+  if (area === "statePark" && fallsDistance < 210) return { label: "Falls Mist", short: "falls", drag: 18, score: 0.19, warning: false };
+  if (area === "statePark" && switchbackDistance < 230) return { label: "Switchback", short: "turns", drag: 10, score: 0.22, warning: false };
   if (area === "statePark" && lakeDistance < 190) return { label: "Lake Edge", short: "lake", drag: 28, score: 0.12, warning: false };
   if (area === "statePark" && bridgeDistance < 175) return { label: "Bridge", short: "bridge", drag: 5, score: 0.2, warning: false };
+  if (area === "bikeLand" && voltDistance < 250) return { label: "Volt Bowl", short: "volt", drag: -16, score: 0.28, warning: false };
+  if (area === "bikeLand" && skylineDistance < 240) return { label: "Skyline", short: "ramp", drag: -15, score: 0.3, warning: false };
   if (area === "bikeLand" && tunnelDistance < 230) return { label: "Neon", short: "neon", drag: -10, score: 0.24, warning: false };
   if (area === "bikeLand" && chargeDistance < 210) return { label: "Charge", short: "charge", drag: -7, score: 0.22, warning: false };
   if (area === "bikeLand" && jumpDistance < 230) return { label: "Jumps", short: "jumps", drag: -12, score: 0.25, warning: false };
@@ -896,9 +916,9 @@ function freeRideTerrain(x: number, y: number, area: RideArea) {
 }
 
 function freeRideObjectives(free: FreeRideModel): ParkObjective[] {
-  const zoneTarget = free.area === "bikeLand" ? 9 : free.area === "statePark" ? 8 : 7;
-  const distanceTarget = free.area === "bikeLand" ? 2100 : free.area === "statePark" ? 1850 : 1600;
-  const comboTarget = free.area === "bikeLand" ? 10 : free.area === "statePark" ? 8 : 7;
+  const zoneTarget = free.area === "bikeLand" ? 11 : free.area === "statePark" ? 9 : 8;
+  const distanceTarget = free.area === "bikeLand" ? 2800 : free.area === "statePark" ? 2300 : 1900;
+  const comboTarget = free.area === "bikeLand" ? 12 : free.area === "statePark" ? 9 : 8;
   const event = dailyParkEvent();
   const eventDone = free.visitedZones.includes(event.spot);
   const paidMission = dateSeed(localDateKey()) % 2 === 0
@@ -1002,6 +1022,8 @@ export default function CasterCycleApp() {
     lastBoostSpot: null,
     jumpLines: 0,
     lastJumpLineDistance: -999,
+    terrainFlow: 0,
+    lastFlowTerrain: "",
     voiceCooldown: 0,
     submitted: false,
     terrain: "Grass",
@@ -1040,6 +1062,8 @@ export default function CasterCycleApp() {
       lastBoostSpot: null,
       jumpLines: 0,
       lastJumpLineDistance: -999,
+      terrainFlow: 0,
+      lastFlowTerrain: "",
       voiceCooldown: 0,
       submitted: false,
       terrain: "Grass",
@@ -1604,6 +1628,8 @@ export default function CasterCycleApp() {
     free.lastBoostSpot = null;
     free.jumpLines = 0;
     free.lastJumpLineDistance = -999;
+    free.terrainFlow = 0;
+    free.lastFlowTerrain = "";
     free.voiceCooldown = 0;
     free.submitted = false;
     free.terrain = selectedArea === "bikeLand" ? "Neon" : selectedArea === "statePark" ? "Downhill" : "Grass";
@@ -2006,6 +2032,12 @@ export default function CasterCycleApp() {
         free.pedalPower = Math.max(0, free.pedalPower - dt * (terrain.label === "Downhill" ? 0.28 : 0.62));
         const parkEvent = dailyParkEvent(current.dateKey);
         free.terrain = terrain.label;
+        if (terrain.label === free.lastFlowTerrain) {
+          free.terrainFlow += dt;
+        } else {
+          free.lastFlowTerrain = terrain.label;
+          free.terrainFlow = 0;
+        }
         const turnDelta = angleDelta(free.heading, free.targetHeading);
         free.heading += turnDelta * Math.min(1, dt * (8.8 + clamp(free.speed / 260, 0, 1.4)));
         const terrainDrag = terrain.label === "Grass" ? terrain.drag * skinStats.grass : terrain.drag;
@@ -2015,7 +2047,10 @@ export default function CasterCycleApp() {
           terrain.label === "Pump" ? 126 :
           terrain.label === "Boardwalk" ? 122 :
           terrain.label === "Bridge" ? 130 :
+          terrain.label === "Volt Bowl" || terrain.label === "Skyline" ? 164 :
           terrain.label === "Neon" || terrain.label === "Charge" || terrain.label === "Jumps" ? 142 :
+          terrain.label === "Switchback" ? 138 :
+          terrain.label === "Falls Mist" ? 124 :
           terrain.label === "Lake Edge" ? 72 :
           terrain.label === "Stream" ? 50 :
           78;
@@ -2025,15 +2060,19 @@ export default function CasterCycleApp() {
           terrain.label === "Pump" ? 220 :
           terrain.label === "Boardwalk" ? 196 :
           terrain.label === "Bridge" ? 198 :
+          terrain.label === "Volt Bowl" || terrain.label === "Skyline" ? 260 :
           terrain.label === "Neon" || terrain.label === "Charge" || terrain.label === "Jumps" ? 230 :
+          terrain.label === "Switchback" ? 214 :
+          terrain.label === "Falls Mist" ? 190 :
           terrain.label === "Lake Edge" ? 118 :
           terrain.label === "Stream" ? 76 :
           142;
         const turnDrag = Math.min(42, Math.abs(turnDelta) * 18);
+        const freeSpeedCap = (effectivePro ? (free.area === "bikeLand" ? 370 : 335) : airdropRoundRef.current ? 330 : 305) * skinStats.speed;
         free.speed = clamp(
           free.speed + ((terrainCruise + free.pedalPower * pedalDrive) * skinStats.speed - free.speed) * dt * 0.82 - dt * (terrainDrag + turnDrag),
           42,
-          (effectivePro ? 335 : 305) * skinStats.speed,
+          freeSpeedCap,
         );
         const move = free.speed * dt;
         const nextX = free.x + Math.cos(free.heading) * move;
@@ -2053,6 +2092,20 @@ export default function CasterCycleApp() {
         free.y = clampedY;
         free.distance += move;
         free.parkScore += move * terrain.score * (terrain.label === parkEvent.terrain ? 1.8 : 1);
+        if (
+          free.terrainFlow > (free.area === "bikeLand" ? 1.75 : 2.25) &&
+          ["Path", "Pump", "Boardwalk", "Bridge", "Downhill", "Falls Mist", "Switchback", "Neon", "Charge", "Jumps", "Volt Bowl", "Skyline"].includes(terrain.label)
+        ) {
+          free.terrainFlow = 0;
+          free.combo += 1;
+          const flowBonus = free.area === "bikeLand" ? 220 + free.combo * 32 : 115 + free.combo * 18;
+          free.parkScore += flowBonus;
+          free.pedalPower = clamp(free.pedalPower + 0.16 * skinStats.boost, 0, 1.45);
+          free.message = `${terrain.short} flow +${flowBonus}`;
+          free.messageT = 0.95;
+          haptic(free.area === "bikeLand" ? "medium" : "light");
+          if (free.combo % 4 === 0) playSfx("combo");
+        }
         if (free.area === "bikeLand" && terrain.label === "Jumps" && free.distance - free.lastJumpLineDistance > 120) {
           free.lastJumpLineDistance = free.distance;
           free.jumpLines += 1;
@@ -2077,7 +2130,7 @@ export default function CasterCycleApp() {
             const discoveryBonus = free.visitedZones.length >= 10 ? 900 : free.visitedZones.length >= 7 ? 560 : free.visitedZones.length >= 4 ? 320 : 0;
             free.parkScore += 260 + free.visitedZones.length * 45 + discoveryBonus + eventBonus;
             free.pedalPower = clamp(free.pedalPower + 0.18 * skinStats.boost, 0, 1.45);
-            free.speed = clamp(free.speed + 22 * skinStats.boost, 42, (effectivePro ? 330 : 300) * skinStats.speed);
+            free.speed = clamp(free.speed + 22 * skinStats.boost, 42, freeSpeedCap);
             free.message = eventBonus > 0 ? `${parkEvent.title} +${eventBonus}` : discoveryBonus > 0 ? `Discovery chain +${discoveryBonus}` : `New zone: ${nextZone}`;
             free.messageT = 1.6;
             haptic(eventBonus > 0 || discoveryBonus > 0 ? "success" : "light");
@@ -2096,8 +2149,12 @@ export default function CasterCycleApp() {
           free.combo += 1;
           free.parkScore += 190 + free.combo * 28;
           free.pedalPower = clamp(free.pedalPower + 0.34 * skinStats.boost, 0, 1.45);
-          free.speed = clamp(free.speed + 44 * skinStats.boost, 42, (effectivePro ? 335 : 305) * skinStats.speed);
-          free.message = `${boostSpot.short} boost +${190 + free.combo * 28}`;
+          free.speed = clamp(free.speed + 44 * skinStats.boost, 42, freeSpeedCap);
+          if (boostSpot.name === "Charge Plaza" && !effectivePro && !preview) {
+            const cap = airdropRoundRef.current ? AIRDROP_ROUND_SECONDS : FREE_ROAM_SECONDS;
+            free.remaining = Math.min(cap, free.remaining + (airdropRoundRef.current ? 14 : 7));
+          }
+          free.message = boostSpot.name === "Charge Plaza" && !effectivePro && !preview ? `${boostSpot.short} +time` : `${boostSpot.short} boost +${190 + free.combo * 28}`;
           free.messageT = 1.25;
           haptic("medium");
           playSfx("boost");
@@ -3168,7 +3225,7 @@ function PremiumWorldTeaser({
             </div>
             <div className="mt-1 truncate text-lg font-black leading-tight text-white">E-Bike Land</div>
             <div className="mt-1 text-xs font-semibold leading-5 text-white/62">
-              Neon Tunnel, Jump Yard, Charge Plaza, Garage, unlimited roaming.
+              Neon Tunnel, Volt Bowl, Skyline Ramp, Charge Plaza, faster flow lines.
             </div>
           </div>
           <div className="shrink-0 rounded-md border border-[#fbe764]/30 bg-[#fbe764]/14 px-2 py-1 text-right">
@@ -4842,9 +4899,9 @@ function UpgradePanel({
         </div>
         <div className="mt-2 grid grid-cols-3 gap-1.5">
           {[
-            ["9", "spots"],
+            ["12", "spots"],
             ["boost", "pads"],
-            ["paid", "lounge"],
+            ["flow", "bonus"],
           ].map(([value, label]) => (
             <div key={label} className="rounded-md border border-white/10 bg-black/16 px-2 py-2 text-center">
               <div className="text-sm font-black text-white">{value}</div>
@@ -5271,12 +5328,23 @@ function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: Free
   drawFreestyleCourt(ctx, 285, -540, 260, 150, "#3da06f", "TENNIS");
   drawFreestyleCourt(ctx, 760, 360, 420, 235, "#4a9b44", "SOCCER");
   drawFreestyleCourt(ctx, -560, 420, 260, 160, "#206857", "STREAM");
+  drawFreestyleCourt(ctx, -1660, 1460, 340, 170, "#c97845", "MARKET");
+  drawFreestyleCourt(ctx, 1680, 1480, 360, 180, "#c77d4b", "SUNSET");
   drawFreestyleCourt(ctx, 110, -980, 280, 190, "#2e714d", "PINES");
   drawFreestyleCourt(ctx, -1180, -1320, 360, 230, "#8bcf5c", "MEADOW");
   drawFreestyleCourt(ctx, -1280, 1040, 360, 150, "#b8844d", "BOARDS");
   drawFreestyleCourt(ctx, 1280, 880, 360, 220, "#ce6847", "PUMP");
   drawFreestyleCourt(ctx, 1150, -1360, 320, 180, "#7ebf8f", "LOOKOUT");
   drawFreestyleCourt(ctx, -250, 1360, 300, 210, "#d9699b", "GARDEN");
+  if (free.area === "statePark") {
+    drawFreestyleCourt(ctx, -1720, 260, 330, 180, "#3e9fa7", "FALLS");
+    drawFreestyleCourt(ctx, 1640, -1640, 340, 190, "#77b96e", "SWITCH");
+  }
+  if (free.area === "bikeLand") {
+    drawFreestyleCourt(ctx, -1680, -1520, 360, 220, "#35f6c8", "VOLT");
+    drawFreestyleCourt(ctx, 1720, 430, 330, 170, "#ff7adf", "LASER");
+    drawFreestyleCourt(ctx, 220, 1660, 360, 180, "#fbe764", "SKYLINE");
+  }
   drawAreaLandmarks(ctx, free, now);
   drawFreestyleTerrainDetails(ctx, now, free);
 
