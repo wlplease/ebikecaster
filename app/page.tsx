@@ -45,8 +45,8 @@ import {
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://castercycle.vercel.app";
 const SHARE_URL = process.env.NEXT_PUBLIC_SHARE_URL || "https://farcaster.xyz/miniapps/_U8dgupnJBvv/castercycle";
 const ETH_ADDRESS_REGEX_CLIENT = /^0x[0-9a-f]{40}$/i;
-const COURSE_LENGTH = 11800;
-const VIEW_DISTANCE = 1280;
+const COURSE_LENGTH = 16800;
+const VIEW_DISTANCE = 1420;
 const STORAGE_PREFIX = "castercycle";
 const DAY_SECONDS = 24 * 60 * 60;
 const LIFETIME_SECONDS = 80 * 365 * 24 * 60 * 60;
@@ -151,6 +151,7 @@ type GameModel = {
   missionNotified: boolean;
   batteryNotified: boolean;
   checkpointNotified: boolean;
+  chapterNotified: number;
   comboVoiceNotified: boolean;
   nearMissVoiceNotified: boolean;
   hitVoiceNotified: boolean;
@@ -228,6 +229,7 @@ type FreeRideModel = {
   x: number;
   y: number;
   heading: number;
+  targetHeading: number;
   speed: number;
   distance: number;
   remaining: number;
@@ -325,6 +327,14 @@ const DAILY_MISSIONS: DailyMission[] = [
   { kind: "bolts", title: "Charge Hunt", goal: "Collect 16 bolts", target: 16, reward: 625 },
 ];
 
+const DAILY_PARK_EVENTS = [
+  { title: "Pump Track Jam", spot: "Pump Track", terrain: "Pump", bonus: 720, color: "#ff8b4a", detail: "Find Pump Track for bonus CYCLE." },
+  { title: "Boardwalk Sprint", spot: "Boardwalk", terrain: "Boardwalk", bonus: 620, color: "#c59a5d", detail: "Ride boards for smoother points." },
+  { title: "Garden Hunt", spot: "Garden Loop", terrain: "Grass", bonus: 680, color: "#ff9ec7", detail: "Discover Garden Loop today." },
+  { title: "Lookout Climb", spot: "Lookout", terrain: "Path", bonus: 760, color: "#a2ff9a", detail: "Reach Lookout before time runs." },
+  { title: "Stream Skills", spot: "Stream Trail", terrain: "Stream", bonus: 840, color: "#5fcbea", detail: "Thread the stream edge cleanly." },
+] as const;
+
 const FREE_RIDE_SPOTS = [
   { name: "Skate Bowl", short: "Skate", x: -720, y: -520, color: "#c9d4d7" },
   { name: "Courts", short: "Courts", x: 620, y: -500, color: "#d46a43" },
@@ -332,18 +342,26 @@ const FREE_RIDE_SPOTS = [
   { name: "Soccer Fields", short: "Soccer", x: 760, y: 360, color: "#4a9b44" },
   { name: "Stream Trail", short: "Stream", x: -520, y: 420, color: "#5fcbea" },
   { name: "Pine Loop", short: "Pines", x: 80, y: -980, color: "#2e714d" },
+  { name: "North Meadow", short: "Meadow", x: -1180, y: -1320, color: "#b7ef66" },
+  { name: "Boardwalk", short: "Boards", x: -1280, y: 1040, color: "#c59a5d" },
+  { name: "Pump Track", short: "Pump", x: 1280, y: 880, color: "#ff8b4a" },
+  { name: "Lookout", short: "Lookout", x: 1150, y: -1360, color: "#a2ff9a" },
+  { name: "Garden Loop", short: "Garden", x: -250, y: 1360, color: "#ff9ec7" },
   { name: "E-Bike Land", short: "Glow", x: 1010, y: -890, color: "#ff7adf" },
   { name: "Trailhead", short: "Start", x: 0, y: 0, color: "#fbe764" },
 ] as const;
 
 const FREE_RIDE_PATHS = [
-  [[-1040, -760], [-600, -520], [-180, -360], [260, -80], [880, 120]],
-  [[-980, 120], [-500, 10], [-60, 40], [480, -160], [1060, -580]],
-  [[-880, 820], [-340, 520], [140, 520], [760, 760]],
-  [[0, -1180], [0, -620], [0, -60], [0, 700], [0, 1120]],
+  [[-1500, -1240], [-1040, -760], [-600, -520], [-180, -360], [260, -80], [880, 120], [1350, 780]],
+  [[-1460, 1040], [-980, 120], [-500, 10], [-60, 40], [480, -160], [1060, -580], [1320, -1320]],
+  [[-1160, 1320], [-880, 820], [-340, 520], [140, 520], [760, 760], [1320, 980]],
+  [[0, -1560], [0, -1180], [0, -620], [0, -60], [0, 700], [0, 1120], [-250, 1480]],
+  [[-1540, -220], [-940, -180], [-420, -720], [120, -980], [680, -900], [1180, -1340]],
+  [[-1320, 1060], [-760, 840], [-260, 1200], [360, 1160], [1040, 620], [1510, 220]],
 ] as const;
 
 const STREAM_PATH = [
+  [-1660, 980],
   [-1260, 520],
   [-760, 270],
   [-560, 650],
@@ -351,7 +369,10 @@ const STREAM_PATH = [
   [260, 116],
   [530, 340],
   [1180, 120],
+  [1580, -320],
 ] as const;
+
+const FREE_RIDE_WORLD_LIMIT = 1780;
 
 function localDateKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -386,6 +407,10 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+function angleDelta(from: number, to: number) {
+  return Math.atan2(Math.sin(to - from), Math.cos(to - from));
+}
+
 function buildEntities(seed: number, area: RideArea) {
   const random = mulberry32(seed + (area === "statePark" ? 991 : area === "bikeLand" ? 1777 : 0));
   const entities: Entity[] = [];
@@ -393,7 +418,12 @@ function buildEntities(seed: number, area: RideArea) {
   let id = 1;
 
   while (at < COURSE_LENGTH - 220) {
-    at += area === "bikeLand" ? 108 + random() * 88 : area === "statePark" ? 132 + random() * 108 : 118 + random() * 112;
+    const lateCourse = at > COURSE_LENGTH * 0.56;
+    at += area === "bikeLand"
+      ? (lateCourse ? 92 : 108) + random() * 86
+      : area === "statePark"
+        ? (lateCourse ? 116 : 132) + random() * 104
+        : (lateCourse ? 102 : 118) + random() * 108;
     const lane = ([-1, 0, 1] as Lane[])[Math.floor(random() * 3)];
     const roll = random();
 
@@ -402,6 +432,8 @@ function buildEntities(seed: number, area: RideArea) {
       if (random() > 0.62) entities.push({ id: id++, kind: "bolt", lane, at: at + 72 });
     } else if (roll < (area === "statePark" ? 0.4 : 0.43)) {
       entities.push({ id: id++, kind: random() > 0.64 ? "battery" : "ring", lane, at });
+    } else if (lateCourse && roll < 0.5) {
+      entities.push({ id: id++, kind: random() > 0.55 ? "gate" : "ramp", lane, at });
     } else if (roll < 0.56) {
       entities.push({ id: id++, kind: "cone", lane, at });
     } else if (roll < (area === "statePark" ? 0.72 : 0.66)) {
@@ -430,8 +462,38 @@ function dailyMission(seed: number) {
   return DAILY_MISSIONS[Math.floor((seed / ROUTES.length) % DAILY_MISSIONS.length)];
 }
 
+function dailyParkEvent(key = localDateKey()) {
+  const seed = dateSeed(key);
+  return DAILY_PARK_EVENTS[seed % DAILY_PARK_EVENTS.length];
+}
+
 function routeForArea(area: RideArea) {
   return ROUTES.find((route) => route.area === area) ?? ROUTES[0];
+}
+
+function raceChapter(game: GameModel) {
+  const progress = clamp(game.distance / COURSE_LENGTH, 0, 1);
+  const index = Math.min(3, Math.floor(progress * 4));
+  const common = [
+    { name: "Trailhead", skyTop: game.route.skyTop, skyBottom: game.route.skyBottom, groundTop: "rgba(139,203,82,0.36)", groundMid: "rgba(73,151,78,0.66)", groundBottom: "rgba(24,65,50,0.92)" },
+    { name: "Court Row", skyTop: "#63b7e8", skyBottom: "#b4dd72", groundTop: "rgba(106,190,91,0.4)", groundMid: "rgba(68,143,82,0.7)", groundBottom: "rgba(24,71,56,0.94)" },
+    { name: "Stream Sprint", skyTop: "#4c9fd3", skyBottom: "#8bd8b2", groundTop: "rgba(95,202,234,0.28)", groundMid: "rgba(54,142,108,0.72)", groundBottom: "rgba(20,68,62,0.96)" },
+    { name: "Festival Finish", skyTop: "#355d9d", skyBottom: "#ffba67", groundTop: "rgba(251,231,100,0.24)", groundMid: "rgba(62,120,98,0.74)", groundBottom: "rgba(18,52,61,0.98)" },
+  ];
+  const state = [
+    { name: "Pine Rise", skyTop: "#5f95be", skyBottom: "#98d99f", groundTop: "rgba(92,156,84,0.36)", groundMid: "rgba(50,112,74,0.72)", groundBottom: "rgba(24,65,50,0.92)" },
+    { name: "Bridge Run", skyTop: "#4e89ad", skyBottom: "#c5e6a2", groundTop: "rgba(124,242,255,0.22)", groundMid: "rgba(54,118,82,0.75)", groundBottom: "rgba(25,72,55,0.96)" },
+    { name: "Ridge Descent", skyTop: "#315f8d", skyBottom: "#e3d27b", groundTop: "rgba(151,187,87,0.34)", groundMid: "rgba(63,105,67,0.74)", groundBottom: "rgba(31,59,45,0.98)" },
+    { name: "Lake Finish", skyTop: "#253f7a", skyBottom: "#f3b36b", groundTop: "rgba(124,242,255,0.24)", groundMid: "rgba(43,102,84,0.72)", groundBottom: "rgba(18,50,60,0.98)" },
+  ];
+  const glow = [
+    { name: "Glow Grid", skyTop: "#372064", skyBottom: "#35c6b7", groundTop: "rgba(67,54,130,0.38)", groundMid: "rgba(38,120,122,0.72)", groundBottom: "rgba(28,35,75,0.92)" },
+    { name: "Pump Alley", skyTop: "#28266d", skyBottom: "#44d6a7", groundTop: "rgba(255,122,223,0.22)", groundMid: "rgba(45,118,132,0.76)", groundBottom: "rgba(26,31,75,0.96)" },
+    { name: "Volt Tunnel", skyTop: "#151a50", skyBottom: "#7cf2ff", groundTop: "rgba(124,242,255,0.18)", groundMid: "rgba(52,92,140,0.72)", groundBottom: "rgba(18,23,64,0.98)" },
+    { name: "Club Sprint", skyTop: "#21154c", skyBottom: "#ff7adf", groundTop: "rgba(251,231,100,0.18)", groundMid: "rgba(88,64,139,0.78)", groundBottom: "rgba(22,18,58,0.98)" },
+  ];
+  const chapters = game.route.area === "bikeLand" ? glow : game.route.area === "statePark" ? state : common;
+  return { ...chapters[index], index, progress, localProgress: progress * 4 - index };
 }
 
 function makeGame(area: RideArea = "park") {
@@ -465,6 +527,7 @@ function makeGame(area: RideArea = "park") {
     missionNotified: false,
     batteryNotified: false,
     checkpointNotified: false,
+    chapterNotified: 0,
     comboVoiceNotified: false,
     nearMissVoiceNotified: false,
     hitVoiceNotified: false,
@@ -573,6 +636,14 @@ function freeRideZone(x: number, y: number) {
   return best.name;
 }
 
+function nextFreeRideSpot(free: FreeRideModel) {
+  const candidates = FREE_RIDE_SPOTS.filter((spot) => spot.name !== "Trailhead" && !free.visitedZones.includes(spot.name));
+  const pool = candidates.length > 0 ? candidates : FREE_RIDE_SPOTS.filter((spot) => spot.name !== "Trailhead");
+  return pool
+    .map((spot) => ({ ...spot, distance: Math.hypot(free.x - spot.x, free.y - spot.y) }))
+    .sort((a, b) => a.distance - b.distance)[0];
+}
+
 function pointSegmentDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number) {
   const dx = bx - ax;
   const dy = by - ay;
@@ -594,16 +665,22 @@ function distanceToPath(x: number, y: number, path: readonly (readonly [number, 
 function freeRideTerrain(x: number, y: number, area: RideArea) {
   const streamDistance = distanceToPath(x, y, STREAM_PATH);
   const pathDistance = Math.min(...FREE_RIDE_PATHS.map((path) => distanceToPath(x, y, path)));
+  const pumpDistance = Math.hypot(x - 1280, y - 880);
+  const boardwalkDistance = Math.hypot(x + 1280, y - 1040);
   if (streamDistance < 54) return { label: "Stream", short: "water", drag: 54, score: 0.08, warning: true };
+  if (pumpDistance < 170) return { label: "Pump", short: "pump", drag: -14, score: 0.22, warning: false };
+  if (boardwalkDistance < 190) return { label: "Boardwalk", short: "boards", drag: 8, score: 0.18, warning: false };
   if (area === "statePark" && y < -680 && pathDistance < 92) return { label: "Downhill", short: "hill", drag: -10, score: 0.18, warning: false };
   if (pathDistance < 46) return { label: "Path", short: "path", drag: 12, score: 0.16, warning: false };
   return { label: "Grass", short: "grass", drag: 36, score: 0.09, warning: false };
 }
 
 function freeRideObjectives(free: FreeRideModel): ParkObjective[] {
-  const zoneTarget = 4;
-  const distanceTarget = 800;
-  const comboTarget = 5;
+  const zoneTarget = free.area === "bikeLand" ? 7 : free.area === "statePark" ? 6 : 5;
+  const distanceTarget = free.area === "bikeLand" ? 1500 : free.area === "statePark" ? 1300 : 1100;
+  const comboTarget = free.area === "bikeLand" ? 8 : 6;
+  const event = dailyParkEvent();
+  const eventDone = free.visitedZones.includes(event.spot);
   return [
     {
       id: "zones",
@@ -625,6 +702,13 @@ function freeRideObjectives(free: FreeRideModel): ParkObjective[] {
       value: `${Math.min(free.combo, comboTarget)}x`,
       progress: clamp(free.combo / comboTarget, 0, 1),
       done: free.combo >= comboTarget,
+    },
+    {
+      id: "event",
+      label: "Daily",
+      value: eventDone ? "hit" : event.spot.split(" ")[0],
+      progress: eventDone ? 1 : 0,
+      done: eventDone,
     },
   ];
 }
@@ -669,6 +753,7 @@ export default function CasterCycleApp() {
     x: 0,
     y: 0,
     heading: -Math.PI / 2,
+    targetHeading: -Math.PI / 2,
     speed: 0,
     distance: 0,
     remaining: FREE_ROAM_SECONDS,
@@ -699,6 +784,7 @@ export default function CasterCycleApp() {
       x: 0,
       y: 0,
       heading: -Math.PI / 2,
+      targetHeading: -Math.PI / 2,
       speed: 0,
       distance: 0,
       remaining: FREE_ROAM_SECONDS,
@@ -746,6 +832,8 @@ export default function CasterCycleApp() {
   const displayName = user?.username ? `@${user.username}` : isStandalone ? "browser rider" : "farcaster rider";
   const progress = clamp(hud.distance / COURSE_LENGTH, 0, 1);
   const mission = missionStatus(game);
+  const rideChapter = raceChapter(game);
+  const parkEvent = dailyParkEvent(game.dateKey);
   const dayActive = dayUntil > Math.floor(Date.now() / 1000);
   const annualActive = annualUntil > Math.floor(Date.now() / 1000);
   const effectivePro = dayActive || annualActive;
@@ -1218,10 +1306,11 @@ export default function CasterCycleApp() {
   const startFreeRide = useCallback(() => {
     const free = freeRideRef.current;
     free.area = rideArea;
-    free.x = 0;
-    free.y = rideArea === "statePark" ? -920 : 0;
+    free.x = rideArea === "bikeLand" ? 1010 : rideArea === "statePark" ? 80 : 0;
+    free.y = rideArea === "bikeLand" ? -890 : rideArea === "statePark" ? -980 : 0;
     free.heading = -Math.PI / 2;
-    free.speed = 210;
+    free.targetHeading = free.heading;
+    free.speed = rideArea === "bikeLand" ? 250 : rideArea === "statePark" ? 230 : 210;
     free.distance = 0;
     free.remaining = effectivePro ? FREE_ROAM_SECONDS : FREE_ROAM_SECONDS;
     free.parkScore = 0;
@@ -1229,10 +1318,10 @@ export default function CasterCycleApp() {
     free.pickupCooldown = 0;
     free.voiceCooldown = 0;
     free.submitted = false;
-    free.terrain = rideArea === "statePark" ? "Downhill" : "Grass";
+    free.terrain = rideArea === "bikeLand" ? "Pump" : rideArea === "statePark" ? "Downhill" : "Grass";
     free.message = "";
     free.messageT = 0;
-    free.zone = rideArea === "statePark" ? "Pine Loop" : "Trailhead";
+    free.zone = rideArea === "bikeLand" ? "E-Bike Land" : rideArea === "statePark" ? "Pine Loop" : "Trailhead";
     free.warned = false;
     free.visitedZones = [free.zone];
     gameRef.current.phase = "ready";
@@ -1250,8 +1339,8 @@ export default function CasterCycleApp() {
   const changeLane = useCallback((direction: -1 | 1) => {
     if (freeRideActive) {
       const free = freeRideRef.current;
-      free.heading += direction * 0.28;
-      free.speed = clamp(free.speed + 18, 0, 360);
+      free.targetHeading += direction * 0.34;
+      free.speed = clamp(free.speed + 18, 0, effectivePro ? 440 : 380);
       syncFreeRideHud();
       haptic("light");
       playSfx("lane");
@@ -1267,12 +1356,12 @@ export default function CasterCycleApp() {
     syncHud();
     haptic("light");
     playSfx("lane");
-  }, [freeRideActive, playSfx, startRide, syncFreeRideHud, syncHud]);
+  }, [effectivePro, freeRideActive, playSfx, startRide, syncFreeRideHud, syncHud]);
 
   const boostOrHop = useCallback(() => {
     if (freeRideActive) {
       const free = freeRideRef.current;
-      free.speed = clamp(free.speed + 70, 0, 420);
+      free.speed = clamp(free.speed + 72, 0, effectivePro ? 460 : 395);
       syncFreeRideHud();
       haptic("medium");
       playSfx("boost");
@@ -1292,7 +1381,7 @@ export default function CasterCycleApp() {
       haptic("medium");
       playSfx("boost");
     }
-  }, [freeRideActive, playSfx, startRide, syncFreeRideHud, syncHud]);
+  }, [effectivePro, freeRideActive, playSfx, startRide, syncFreeRideHud, syncHud]);
 
   const handleCoursePointerDown = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
     coursePointerRef.current = { x: event.clientX, y: event.clientY };
@@ -1312,8 +1401,8 @@ export default function CasterCycleApp() {
       const centerX = rect.width / 2;
       const centerY = rect.height * 0.58;
       const targetAngle = Math.atan2(y - centerY, x - centerX);
-      free.heading = targetAngle;
-      free.speed = clamp(free.speed + (Math.abs(dx) + Math.abs(dy) > 18 ? 52 : 28), 80, 390);
+      free.targetHeading = targetAngle;
+      free.speed = clamp(free.speed + (Math.abs(dx) + Math.abs(dy) > 18 ? 54 : 30), 90, effectivePro ? 455 : 390);
       syncFreeRideHud();
       haptic("selection");
       return;
@@ -1327,7 +1416,7 @@ export default function CasterCycleApp() {
     if (x < rect.width * 0.34) changeLane(-1);
     else if (x > rect.width * 0.66) changeLane(1);
     else boostOrHop();
-  }, [boostOrHop, changeLane, freeRideActive, syncFreeRideHud]);
+  }, [boostOrHop, changeLane, effectivePro, freeRideActive, syncFreeRideHud]);
 
   const shareCast = useCallback(async (text: string, embeds: [] | [string] | [string, string], copiedText = "Share copied") => {
     const finalText = text.trimEnd().endsWith(SHARE_URL) ? text.trimEnd() : `${text.trimEnd()}\n${SHARE_URL}`;
@@ -1563,13 +1652,28 @@ export default function CasterCycleApp() {
         if (free.messageT > 0) free.messageT = Math.max(0, free.messageT - dt);
         if (free.pickupCooldown > 0) free.pickupCooldown = Math.max(0, free.pickupCooldown - dt);
         const terrain = freeRideTerrain(free.x, free.y, free.area);
+        const parkEvent = dailyParkEvent(current.dateKey);
         free.terrain = terrain.label;
-        free.speed = clamp(free.speed - dt * terrain.drag, 0, effectivePro ? 455 : 370);
+        free.heading += angleDelta(free.heading, free.targetHeading) * Math.min(1, dt * 7.4);
+        free.speed = clamp(free.speed - dt * terrain.drag, 0, effectivePro ? 470 : 390);
         const move = free.speed * dt;
-        free.x = clamp(free.x + Math.cos(free.heading) * move, -1180, 1180);
-        free.y = clamp(free.y + Math.sin(free.heading) * move, -1180, 1180);
+        const nextX = free.x + Math.cos(free.heading) * move;
+        const nextY = free.y + Math.sin(free.heading) * move;
+        const clampedX = clamp(nextX, -FREE_RIDE_WORLD_LIMIT, FREE_RIDE_WORLD_LIMIT);
+        const clampedY = clamp(nextY, -FREE_RIDE_WORLD_LIMIT, FREE_RIDE_WORLD_LIMIT);
+        if (clampedX !== nextX || clampedY !== nextY) {
+          free.targetHeading = free.heading + Math.PI * 0.72;
+          free.speed = Math.max(90, free.speed * 0.58);
+          if (free.messageT <= 0.1) {
+            free.message = "Park edge - turn back";
+            free.messageT = 0.9;
+            haptic("warning");
+          }
+        }
+        free.x = clampedX;
+        free.y = clampedY;
         free.distance += move;
-        free.parkScore += move * terrain.score;
+        free.parkScore += move * terrain.score * (terrain.label === parkEvent.terrain ? 1.8 : 1);
         if (terrain.warning && free.messageT <= 0.1) {
           free.message = "Stream edge slows you";
           free.messageT = 0.7;
@@ -1580,12 +1684,14 @@ export default function CasterCycleApp() {
           if (!free.visitedZones.includes(nextZone)) {
             free.visitedZones.push(nextZone);
             free.combo += 1;
-            free.parkScore += 260 + free.visitedZones.length * 45;
-            free.speed = clamp(free.speed + 34, 0, effectivePro ? 430 : 360);
-            free.message = `New zone: ${nextZone}`;
+            const eventBonus = nextZone === parkEvent.spot ? parkEvent.bonus : 0;
+            const discoveryBonus = free.visitedZones.length >= 10 ? 900 : free.visitedZones.length >= 7 ? 560 : free.visitedZones.length >= 4 ? 320 : 0;
+            free.parkScore += 260 + free.visitedZones.length * 45 + discoveryBonus + eventBonus;
+            free.speed = clamp(free.speed + 38, 0, effectivePro ? 455 : 380);
+            free.message = eventBonus > 0 ? `${parkEvent.title} +${eventBonus}` : discoveryBonus > 0 ? `Discovery chain +${discoveryBonus}` : `New zone: ${nextZone}`;
             free.messageT = 1.6;
-            haptic("light");
-            playSfx("combo");
+            haptic(discoveryBonus > 0 ? "success" : "light");
+            playSfx(discoveryBonus > 0 ? "clear" : "combo");
             if (free.voiceCooldown <= 0 && free.visitedZones.length <= 3) {
               free.voiceCooldown = 6;
               playVoice("parkZone", { route: nextZone });
@@ -1597,7 +1703,7 @@ export default function CasterCycleApp() {
           free.pickupCooldown = 1.15;
           free.combo += 1;
           free.parkScore += 190 + free.combo * 28;
-          free.speed = clamp(free.speed + 82, 0, effectivePro ? 430 : 360);
+          free.speed = clamp(free.speed + 86, 0, effectivePro ? 460 : 385);
           free.message = `${boostSpot.short} boost +${190 + free.combo * 28}`;
           free.messageT = 1.25;
           haptic("medium");
@@ -1638,10 +1744,20 @@ export default function CasterCycleApp() {
         if (current.airborne > 0) current.airborne = Math.max(0, current.airborne - dt * 2.65);
         if (current.boost > 0) current.boost = Math.max(0, current.boost - dt * 0.85);
 
-        current.speed = clamp(330 + current.boost * 190 + current.distance * 0.012, 320, 440);
+        current.speed = clamp(330 + current.boost * 198 + current.distance * 0.008, 320, 452);
         current.distance += current.speed * dt;
-        current.battery = clamp(current.battery - dt * (1.05 + current.boost * 1.6), 0, 100);
+        current.battery = clamp(current.battery - dt * (0.72 + current.boost * 1.18), 0, 100);
         updateMotor(current);
+        const chapter = raceChapter(current);
+
+        if (chapter.index > current.chapterNotified) {
+          current.chapterNotified = chapter.index;
+          current.score += 320 + chapter.index * 90 + current.combo * 18;
+          current.boost = Math.max(current.boost, 0.34 + chapter.index * 0.08);
+          rideSignal(current, chapter.name.toUpperCase(), current.route.roadEdge, 0.1);
+          haptic("success");
+          playSfx("clear");
+        }
 
         if (!current.batteryNotified && current.battery <= 25) {
           current.batteryNotified = true;
@@ -1653,17 +1769,17 @@ export default function CasterCycleApp() {
 
         if (!current.checkpointNotified && current.distance >= COURSE_LENGTH * 0.5) {
           current.checkpointNotified = true;
-          current.score += 420 + current.combo * 22;
-          rideSignal(current, "HALFWAY FLOW", current.route.bolt, 0.08);
+          current.score += 620 + current.combo * 26;
+          rideSignal(current, "MID RIDE BONUS", current.route.bolt, 0.08);
           haptic("success");
           playSfx("clear");
           playVoice("checkpoint");
         }
 
-        if (!current.finalStretchNotified && current.distance >= COURSE_LENGTH * 0.84) {
+        if (!current.finalStretchNotified && current.distance >= COURSE_LENGTH * 0.78) {
           current.finalStretchNotified = true;
-          current.score += 520 + current.combo * 24;
-          current.boost = Math.max(current.boost, 0.5);
+          current.score += 720 + current.combo * 30;
+          current.boost = Math.max(current.boost, 0.64);
           rideSignal(current, "FINAL STRETCH", current.route.roadEdge, 0.1);
           haptic("heavy");
           playSfx("combo");
@@ -1873,7 +1989,7 @@ export default function CasterCycleApp() {
             </span>
             <span className="flex min-w-[48px] items-center justify-center gap-1 rounded-md border border-white/10 bg-white/8 px-2 py-1.5">
               <BatteryCharging size={13} className="text-[#a2ff9a]" />
-              {freeRideActive ? (freeRideHud.unlimited ? "∞" : `${Math.ceil(freeRideHud.remaining)}s`) : `${Math.round(hud.battery)}%`}
+              {freeRideActive ? (freeRideHud.unlimited ? "all" : `${Math.ceil(freeRideHud.remaining)}s`) : `${Math.round(hud.battery)}%`}
             </span>
             <button
               aria-label={audioEnabled ? "Turn sound effects off" : "Turn sound effects on"}
@@ -1900,30 +2016,35 @@ export default function CasterCycleApp() {
             style={{ width: `${freeRideActive && !freeRideHud.unlimited ? Math.round((freeRideHud.remaining / FREE_ROAM_SECONDS) * 100) : Math.round(progress * 100)}%` }}
           />
         </div>
+        <StatusRibbon
+          accent={freeRideActive ? parkEvent.color : game.route.roadEdge}
+          label={freeRideActive ? parkEvent.title : rideChapter.name}
+          value={freeRideActive ? `${parkEvent.spot} +${parkEvent.bonus}` : `${Math.round(progress * 100)}% - ${mission.label}`}
+        />
       </div>
 
       {freeRideActive && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 px-3">
+          <ObjectiveStrip objectives={freeRideHud.objectives} />
           <div className="grid grid-cols-4 gap-2">
             <Metric icon={<Gauge size={14} />} label="mph" value={String(Math.round(freeRideHud.speed / 8))} />
             <Metric icon={<Trophy size={14} />} label="score" value={Math.round(freeRideHud.score).toLocaleString()} />
             <Metric icon={<Flame size={14} />} label="combo" value={`${freeRideHud.combo}x`} />
             <Metric icon={<Map size={14} />} label="surface" value={freeRideHud.terrain} />
           </div>
-          <div className="pointer-events-auto mt-2 grid grid-cols-4 gap-2">
-            <button aria-label="Turn left" className="inline-flex min-h-11 items-center justify-center gap-0.5 rounded-md border border-white/18 bg-black/32 px-1 text-[10px] font-black uppercase tracking-[0.04em] text-white/80 backdrop-blur-md active:scale-[0.98]" onClick={() => changeLane(-1)}>
-              <ChevronLeft size={17} />
-              Left
+          <div className="pointer-events-auto mt-2 grid grid-cols-[0.8fr_1.4fr_0.8fr_1fr] gap-2">
+            <button aria-label="Turn left" className="inline-flex min-h-11 items-center justify-center rounded-md border border-white/18 bg-black/32 px-1 text-white/80 backdrop-blur-md active:scale-[0.98]" onClick={() => changeLane(-1)}>
+              <ChevronLeft size={22} />
             </button>
             <button aria-label="Pedal faster" className="inline-flex min-h-11 items-center justify-center gap-0.5 rounded-md border border-[#fbe764]/50 bg-[#fbe764]/18 px-1 text-[10px] font-black uppercase tracking-[0.04em] text-[#fbe764] backdrop-blur-md active:scale-[0.98]" onClick={boostOrHop}>
               <Zap size={16} />
               Pedal
             </button>
-            <button aria-label="Turn right" className="inline-flex min-h-11 items-center justify-center gap-0.5 rounded-md border border-white/18 bg-black/32 px-1 text-[10px] font-black uppercase tracking-[0.04em] text-white/80 backdrop-blur-md active:scale-[0.98]" onClick={() => changeLane(1)}>
-              Right
-              <ChevronRight size={17} />
+            <button aria-label="Turn right" className="inline-flex min-h-11 items-center justify-center rounded-md border border-white/18 bg-black/32 px-1 text-white/80 backdrop-blur-md active:scale-[0.98]" onClick={() => changeLane(1)}>
+              <ChevronRight size={22} />
             </button>
-            <button className="inline-flex min-h-11 items-center justify-center rounded-md border border-[#ff5d73]/45 bg-[#ff5d73]/18 px-1 text-[10px] font-black uppercase tracking-[0.04em] text-white backdrop-blur-md active:scale-[0.98]" onClick={() => stopFreeRide(false)}>
+            <button className="inline-flex min-h-11 items-center justify-center gap-1 rounded-md border border-[#ff5d73]/45 bg-[#ff5d73]/18 px-1 text-[10px] font-black uppercase tracking-[0.04em] text-white backdrop-blur-md active:scale-[0.98]" onClick={() => stopFreeRide(false)}>
+              <Map size={14} />
               Park
             </button>
           </div>
@@ -2007,7 +2128,7 @@ export default function CasterCycleApp() {
                     <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[#7cf2ff]">{resultLabel}</div>
                     <h1 className="mt-1 truncate text-2xl font-black leading-none tracking-normal text-white">{dashboardTab === "ride" ? "Play" : dashboardTab === "shop" ? "Pass" : dashboardTab === "garage" ? "Garage" : dashboardTab === "club" ? "Club" : "Rank"}</h1>
                     <p className="mt-1 truncate text-sm font-medium leading-5 text-white/64">
-                      {hud.phase === "finished" ? `${hud.score.toLocaleString()} on ${game.route.name}` : `${game.route.name} · ${displayName}`}
+                      {hud.phase === "finished" ? `${hud.score.toLocaleString()} on ${game.route.name}` : `${game.route.name} - ${displayName}`}
                     </p>
                   </div>
                   <div className="shrink-0">
@@ -2330,7 +2451,7 @@ function WelcomeBackPanel({
         <div className="min-w-0">
           <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[#7cf2ff]">Welcome back</div>
           <h1 className="mt-1 text-3xl font-black leading-none tracking-normal text-white">Today’s Ride</h1>
-          <p className="mt-2 truncate text-sm font-semibold leading-5 text-white/68">{displayName} · {routeName}</p>
+          <p className="mt-2 truncate text-sm font-semibold leading-5 text-white/68">{displayName} - {routeName}</p>
         </div>
         <Image
           src="/media/castercycle.png"
@@ -2439,14 +2560,14 @@ function WorldHub({
       kicker: "Open ride",
       badge: "Open",
       access: "Community",
-      feature: "Skatepark, courts, fields, streams, and open paths.",
+      feature: "Expanded park with courts, fields, streams, gardens, and pump lines.",
       lockText: "Open",
     },
     statePark: {
       kicker: "Open ride",
       badge: "Open",
       access: "Free",
-      feature: "Forest loops, stream bridges, hill descents, and longer lines.",
+      feature: "Long forest loops, stream bridges, descents, and lookout routes.",
       lockText: "Open",
     },
     bikeLand: {
@@ -2526,7 +2647,7 @@ function WorldHub({
               Freestyle park
             </div>
             <div className="mt-1 text-sm font-black text-white">Open world ride</div>
-            <div className="mt-1 text-xs font-semibold leading-4 text-white/55">Open park. Terrain matters.</div>
+              <div className="mt-1 text-xs font-semibold leading-4 text-white/55">Big map, terrain, zones.</div>
           </div>
           <button
             className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[#a2ff9a] px-3 text-xs font-black text-[#111923] active:scale-[0.98]"
@@ -2659,6 +2780,42 @@ function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; 
       <div className="flex items-center justify-between text-[#fbe764]">{icon}</div>
       <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.08em] text-white/50">{label}</div>
       <div className="whitespace-nowrap text-[12px] font-black leading-tight">{value}</div>
+    </div>
+  );
+}
+
+function StatusRibbon({ accent, label, value }: { accent: string; label: string; value: string }) {
+  return (
+    <div className="mt-2 flex min-h-9 items-center justify-between gap-2 rounded-md border border-white/10 bg-[#071018]/58 px-3 py-1.5 shadow-[0_10px_28px_rgba(0,0,0,0.22)] backdrop-blur-xl">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="h-2 w-2 shrink-0 rounded-full shadow-[0_0_12px_currentColor]" style={{ backgroundColor: accent, color: accent }} />
+        <span className="truncate text-[10px] font-black uppercase tracking-[0.14em] text-white">{label}</span>
+      </div>
+      <div className="truncate text-right text-[10px] font-bold text-white/56">{value}</div>
+    </div>
+  );
+}
+
+function ObjectiveStrip({ objectives }: { objectives: ParkObjective[] }) {
+  return (
+    <div className="mb-2 grid grid-cols-4 gap-1.5">
+      {objectives.map((objective) => (
+        <div
+          key={objective.id}
+          className={`min-w-0 rounded-md border px-2 py-1.5 backdrop-blur-md ${
+            objective.done ? "border-[#a2ff9a]/55 bg-[#a2ff9a]/16" : "border-white/12 bg-black/24"
+          }`}
+        >
+          <div className="flex items-center justify-between gap-1">
+            <span className="truncate text-[8px] font-black uppercase tracking-[0.08em] text-white/48">{objective.label}</span>
+            {objective.done && <CheckCircle2 size={10} className="shrink-0 text-[#a2ff9a]" />}
+          </div>
+          <div className="mt-1 truncate text-[10px] font-black leading-none text-white">{objective.value}</div>
+          <div className="mt-1 h-0.5 overflow-hidden rounded-full bg-white/12">
+            <div className="h-full rounded-full bg-[#fbe764]" style={{ width: `${Math.round(objective.progress * 100)}%` }} />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -3496,6 +3653,7 @@ function lanePoint(width: number, height: number, lane: number, progress: number
 
 function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height: number, free: FreeRideModel, skin: Skin, unlimited: boolean, now: number) {
   ctx.save();
+  const nextSpot = nextFreeRideSpot(free);
   const sky = ctx.createLinearGradient(0, 0, 0, height);
   sky.addColorStop(0, free.area === "statePark" ? "#5f95be" : "#70b7e7");
   sky.addColorStop(0.38, free.area === "statePark" ? "#88cfa1" : "#8ed47b");
@@ -3505,6 +3663,7 @@ function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height:
 
   ctx.save();
   ctx.translate(width / 2, height * 0.56);
+  ctx.scale(width < 440 ? 0.74 : 0.82, width < 440 ? 0.74 : 0.82);
   ctx.translate(-free.x, -free.y);
   drawFreestyleMap(ctx, now, free);
   ctx.restore();
@@ -3524,7 +3683,7 @@ function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height:
   ctx.fillText(unlimited ? (free.area === "statePark" ? "STATE PARK UNLIMITED" : "UNLIMITED FREESTYLE") : `${Math.ceil(free.remaining)}S FREE RIDE`, 30, height * 0.13 + 19);
   ctx.fillStyle = "#ffffff";
   ctx.font = "900 16px system-ui, sans-serif";
-  ctx.fillText(`${free.zone} · ${free.terrain}`, 30, height * 0.13 + 39);
+  ctx.fillText(`${free.zone} - ${free.terrain}`, 30, height * 0.13 + 39);
 
   if (free.messageT > 0 && free.message) {
     ctx.save();
@@ -3564,6 +3723,35 @@ function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height:
   ctx.fill();
   ctx.restore();
 
+  if (nextSpot) {
+    const angle = Math.atan2(nextSpot.y - free.y, nextSpot.x - free.x);
+    const turn = angle - free.heading;
+    ctx.save();
+    ctx.translate(compassX, compassY + 50);
+    ctx.fillStyle = "rgba(7,16,24,0.58)";
+    ctx.strokeStyle = "rgba(255,255,255,0.16)";
+    ctx.lineWidth = 1;
+    roundRect(ctx, -58, -23, 116, 48, 9);
+    ctx.fill();
+    ctx.stroke();
+    ctx.rotate(turn);
+    ctx.fillStyle = nextSpot.color;
+    ctx.beginPath();
+    ctx.moveTo(0, -12);
+    ctx.lineTo(8, 9);
+    ctx.lineTo(0, 4);
+    ctx.lineTo(-8, 9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.rotate(-turn);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "900 9px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`${nextSpot.short} ${Math.round(nextSpot.distance)}m`, 0, 16);
+    ctx.restore();
+  }
+
   drawFreeRideMiniMap(ctx, width, height, free, unlimited);
 
   drawVignette(ctx, width, height, { boost: clamp(free.speed / 420, 0, 1) } as GameModel);
@@ -3575,7 +3763,7 @@ function drawFreeRideMiniMap(ctx: CanvasRenderingContext2D, width: number, heigh
   const mapH = mapW;
   const x = width - mapW - 14;
   const y = height * 0.28;
-  const scale = mapW / 2600;
+  const scale = mapW / (FREE_RIDE_WORLD_LIMIT * 2);
 
   ctx.save();
   ctx.fillStyle = "rgba(7,16,24,0.62)";
@@ -3590,12 +3778,7 @@ function drawFreeRideMiniMap(ctx: CanvasRenderingContext2D, width: number, heigh
 
   ctx.strokeStyle = "rgba(159,242,138,0.42)";
   ctx.lineWidth = 4;
-  for (const path of [
-    [[-1040, -760], [-600, -520], [-180, -360], [260, -80], [880, 120]],
-    [[-980, 120], [-500, 10], [-60, 40], [480, -160], [1060, -580]],
-    [[-880, 820], [-340, 520], [140, 520], [760, 760]],
-    [[0, -1180], [0, -620], [0, -60], [0, 700], [0, 1120]],
-  ]) {
+  for (const path of FREE_RIDE_PATHS) {
     ctx.beginPath();
     path.forEach(([px, py], index) => {
       const sx = x + mapW / 2 + px * scale;
@@ -3626,30 +3809,58 @@ function drawFreeRideMiniMap(ctx: CanvasRenderingContext2D, width: number, heigh
 
 function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: FreeRideModel) {
   ctx.fillStyle = free.area === "statePark" ? "#4f9b66" : "#69bd68";
-  ctx.fillRect(-1400, -1400, 2800, 2800);
+  ctx.fillRect(-FREE_RIDE_WORLD_LIMIT, -FREE_RIDE_WORLD_LIMIT, FREE_RIDE_WORLD_LIMIT * 2, FREE_RIDE_WORLD_LIMIT * 2);
 
   ctx.strokeStyle = "rgba(13,61,50,0.18)";
   ctx.lineWidth = 2;
-  for (let x = -1400; x <= 1400; x += 160) {
+  for (let x = -FREE_RIDE_WORLD_LIMIT; x <= FREE_RIDE_WORLD_LIMIT; x += 160) {
     ctx.beginPath();
-    ctx.moveTo(x, -1400);
-    ctx.lineTo(x, 1400);
+    ctx.moveTo(x, -FREE_RIDE_WORLD_LIMIT);
+    ctx.lineTo(x, FREE_RIDE_WORLD_LIMIT);
     ctx.stroke();
   }
-  for (let y = -1400; y <= 1400; y += 160) {
+  for (let y = -FREE_RIDE_WORLD_LIMIT; y <= FREE_RIDE_WORLD_LIMIT; y += 160) {
     ctx.beginPath();
-    ctx.moveTo(-1400, y);
-    ctx.lineTo(1400, y);
+    ctx.moveTo(-FREE_RIDE_WORLD_LIMIT, y);
+    ctx.lineTo(FREE_RIDE_WORLD_LIMIT, y);
     ctx.stroke();
+  }
+
+  if (free.area === "statePark") {
+    ctx.save();
+    ctx.strokeStyle = "rgba(241,255,215,0.18)";
+    ctx.lineWidth = 5;
+    for (let i = 0; i < 8; i += 1) {
+      ctx.beginPath();
+      ctx.ellipse(-620 + i * 210, -1180 + i * 42, 390 + i * 35, 130 + i * 18, -0.18, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  if (free.area === "bikeLand") {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = "rgba(255,122,223,0.3)";
+    ctx.lineWidth = 7;
+    for (let i = -3; i <= 3; i += 1) {
+      ctx.beginPath();
+      ctx.moveTo(-FREE_RIDE_WORLD_LIMIT, i * 420);
+      ctx.lineTo(FREE_RIDE_WORLD_LIMIT, i * 420 + 260);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   ctx.strokeStyle = "#5fcbea";
   ctx.lineWidth = 42;
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(-1260, 520);
+  ctx.moveTo(-1660, 980);
+  ctx.bezierCurveTo(-1360, 760, -1120, 690, -1260, 520);
   ctx.bezierCurveTo(-760, 270, -560, 650, -160, 390);
   ctx.bezierCurveTo(260, 116, 530, 340, 1180, 120);
+  ctx.bezierCurveTo(1390, -20, 1450, -210, 1580, -320);
   ctx.stroke();
 
   if (free.area === "statePark") {
@@ -3682,13 +3893,7 @@ function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: Free
 
   ctx.strokeStyle = "#314f46";
   ctx.lineWidth = 34;
-  const paths = [
-    [[-1040, -760], [-600, -520], [-180, -360], [260, -80], [880, 120]],
-    [[-980, 120], [-500, 10], [-60, 40], [480, -160], [1060, -580]],
-    [[-880, 820], [-340, 520], [140, 520], [760, 760]],
-    [[0, -1180], [0, -620], [0, -60], [0, 700], [0, 1120]],
-  ];
-  for (const path of paths) {
+  for (const path of FREE_RIDE_PATHS) {
     ctx.beginPath();
     path.forEach(([x, y], index) => {
       if (index === 0) ctx.moveTo(x, y);
@@ -3699,7 +3904,7 @@ function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: Free
   ctx.strokeStyle = "#fbe764";
   ctx.lineWidth = 4;
   ctx.setLineDash([28, 34]);
-  for (const path of paths) {
+  for (const path of FREE_RIDE_PATHS) {
     ctx.beginPath();
     path.forEach(([x, y], index) => {
       if (index === 0) ctx.moveTo(x, y);
@@ -3715,6 +3920,12 @@ function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: Free
   drawFreestyleCourt(ctx, 760, 360, 420, 235, "#4a9b44", "SOCCER");
   drawFreestyleCourt(ctx, -560, 420, 260, 160, "#206857", "STREAM");
   drawFreestyleCourt(ctx, 110, -980, 280, 190, "#2e714d", "PINES");
+  drawFreestyleCourt(ctx, -1180, -1320, 360, 230, "#8bcf5c", "MEADOW");
+  drawFreestyleCourt(ctx, -1280, 1040, 360, 150, "#b8844d", "BOARDS");
+  drawFreestyleCourt(ctx, 1280, 880, 360, 220, "#ce6847", "PUMP");
+  drawFreestyleCourt(ctx, 1150, -1360, 320, 180, "#7ebf8f", "LOOKOUT");
+  drawFreestyleCourt(ctx, -250, 1360, 300, 210, "#d9699b", "GARDEN");
+  drawFreestyleTerrainDetails(ctx, now, free);
 
   for (const spot of FREE_RIDE_SPOTS) {
     if (spot.name === "Trailhead") continue;
@@ -3735,9 +3946,9 @@ function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: Free
   ctx.restore();
 
   ctx.fillStyle = "#1e6a42";
-  for (let i = 0; i < 90; i += 1) {
-    const x = ((i * 173) % 2600) - 1300;
-    const y = ((i * 311) % 2600) - 1300;
+  for (let i = 0; i < 140; i += 1) {
+    const x = ((i * 173) % (FREE_RIDE_WORLD_LIMIT * 2 - 120)) - FREE_RIDE_WORLD_LIMIT + 60;
+    const y = ((i * 311) % (FREE_RIDE_WORLD_LIMIT * 2 - 120)) - FREE_RIDE_WORLD_LIMIT + 60;
     if (Math.abs(x) < 95 || Math.abs(y) < 95) continue;
     const r = 10 + ((i * 7) % 16);
     ctx.beginPath();
@@ -3754,6 +3965,62 @@ function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: Free
   ctx.stroke();
   ctx.shadowBlur = 0;
   drawFreestyleLabel(ctx, 1010, -890, "E-BIKE LAND");
+}
+
+function drawFreestyleTerrainDetails(ctx: CanvasRenderingContext2D, now: number, free: FreeRideModel) {
+  ctx.save();
+
+  ctx.strokeStyle = "rgba(69,43,22,0.52)";
+  ctx.lineWidth = 5;
+  for (let i = -4; i <= 4; i += 1) {
+    ctx.beginPath();
+    ctx.moveTo(-1430 + i * 36, 990);
+    ctx.lineTo(-1130 + i * 36, 1090);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "#fbe764";
+  ctx.lineWidth = 7;
+  ctx.lineCap = "round";
+  for (let i = 0; i < 5; i += 1) {
+    const x = 1160 + i * 60;
+    const lift = Math.sin(now / 220 + i) * 4;
+    ctx.beginPath();
+    ctx.moveTo(x - 46, 880 + lift);
+    ctx.quadraticCurveTo(x - 20, 824 + lift, x + 8, 880 + lift);
+    ctx.quadraticCurveTo(x + 30, 928 + lift, x + 56, 880 + lift);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "rgba(255,255,255,0.72)";
+  for (let i = 0; i < 28; i += 1) {
+    const x = -360 + ((i * 47) % 230);
+    const y = 1260 + ((i * 71) % 190);
+    ctx.beginPath();
+    ctx.arc(x, y, 4 + (i % 3), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  if (free.area === "statePark") {
+    ctx.strokeStyle = "rgba(255,255,255,0.38)";
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 6; i += 1) {
+      ctx.beginPath();
+      ctx.ellipse(1150, -1360, 140 + i * 28, 58 + i * 13, -0.2, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  if (free.area === "bikeLand") {
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = "rgba(255,122,223,0.72)";
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    ctx.arc(1010, -890, 230, 0.2, Math.PI * 1.72);
+    ctx.stroke();
+  }
+
+  ctx.restore();
 }
 
 function drawFreestyleBoostPad(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, visited: boolean, now: number) {
@@ -3862,9 +4129,10 @@ function drawScene(ctx: CanvasRenderingContext2D, width: number, height: number,
     ctx.translate(pulse, Math.cos(now * 0.07) * game.shake * 4);
   }
 
+  const chapter = raceChapter(game);
   const sky = ctx.createLinearGradient(0, 0, 0, height);
-  sky.addColorStop(0, game.route.skyTop);
-  sky.addColorStop(0.54, game.route.skyBottom);
+  sky.addColorStop(0, chapter.skyTop);
+  sky.addColorStop(0.54, chapter.skyBottom);
   sky.addColorStop(1, "#111923");
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, width, height);
@@ -3921,11 +4189,12 @@ function drawParkLandmarks(ctx: CanvasRenderingContext2D, width: number, height:
   const horizon = height * 0.25;
   const statePark = game.route.area === "statePark";
   const bikeLand = game.route.area === "bikeLand";
+  const chapter = raceChapter(game);
 
   const grass = ctx.createLinearGradient(0, horizon, 0, height);
-  grass.addColorStop(0, bikeLand ? "rgba(67,54,130,0.38)" : statePark ? "rgba(92,156,84,0.36)" : "rgba(139,203,82,0.36)");
-  grass.addColorStop(0.58, bikeLand ? "rgba(38,120,122,0.72)" : statePark ? "rgba(50,112,74,0.72)" : "rgba(73,151,78,0.66)");
-  grass.addColorStop(1, bikeLand ? "rgba(28,35,75,0.92)" : "rgba(24,65,50,0.92)");
+  grass.addColorStop(0, chapter.groundTop);
+  grass.addColorStop(0.58, chapter.groundMid);
+  grass.addColorStop(1, chapter.groundBottom);
   ctx.fillStyle = grass;
   ctx.fillRect(0, horizon, width, height - horizon);
 
@@ -3971,7 +4240,7 @@ function drawParkLandmarks(ctx: CanvasRenderingContext2D, width: number, height:
       const y = horizon + progress * (height - horizon);
       const scale = 0.28 + progress * 1.08;
       const x = width / 2 + side * (width * (0.24 + progress * 0.38));
-      const label = labels[(i + (side > 0 ? 2 : 0)) % labels.length];
+      const label = labels[(i + chapter.index + (side > 0 ? 2 : 0)) % labels.length];
       ctx.save();
       ctx.translate(x, y - 58 * scale);
       ctx.rotate(side * (statePark ? -0.06 : -0.1));
@@ -4223,10 +4492,11 @@ function drawVignette(ctx: CanvasRenderingContext2D, width: number, height: numb
 function drawRoad(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel) {
   const horizon = height * 0.25;
   const bottom = height - 76;
+  const chapter = raceChapter(game);
   const road = ctx.createLinearGradient(0, horizon, 0, bottom);
-  road.addColorStop(0, game.route.road);
-  road.addColorStop(0.72, "#1f3147");
-  road.addColorStop(1, "#101923");
+  road.addColorStop(0, chapter.index === 2 ? "#284f55" : game.route.road);
+  road.addColorStop(0.72, chapter.index === 3 ? "#26304e" : "#1f3147");
+  road.addColorStop(1, chapter.index === 3 ? "#14152f" : "#101923");
   ctx.fillStyle = road;
   ctx.beginPath();
   ctx.moveTo(width * 0.44, horizon);
@@ -4316,6 +4586,7 @@ function drawRouteFx(ctx: CanvasRenderingContext2D, width: number, height: numbe
   const horizon = height * 0.25;
   const pulse = 0.5 + Math.sin(now / 260) * 0.5;
   const comboGlow = Math.min(1, game.combo / 12);
+  const chapter = raceChapter(game);
 
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
@@ -4376,7 +4647,21 @@ function drawRouteFx(ctx: CanvasRenderingContext2D, width: number, height: numbe
     ctx.font = "900 11px system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(game.route.name.toUpperCase(), width / 2, signY);
+    ctx.fillText(`${chapter.name.toUpperCase()} ${Math.round(chapter.progress * 100)}%`, width / 2, signY);
+  }
+
+  ctx.globalAlpha = 0.56;
+  ctx.strokeStyle = "rgba(255,255,255,0.24)";
+  ctx.lineWidth = 2;
+  for (let i = 1; i < 4; i += 1) {
+    const marker = i / 4;
+    if (Math.abs(chapter.progress - marker) < 0.08) {
+      const y = horizon + 46 + Math.sin(now / 180) * 2;
+      ctx.beginPath();
+      ctx.moveTo(width * 0.18, y + i * 7);
+      ctx.lineTo(width * 0.82, y + i * 7);
+      ctx.stroke();
+    }
   }
 
   if (comboGlow > 0) {
