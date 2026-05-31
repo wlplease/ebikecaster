@@ -55,7 +55,8 @@ const FREE_ROAM_SECONDS = 30;
 const KINGBULL_AWIN_URL = "https://www.awin1.com/cread.php?awinmid=124136&awinaffid=2916043";
 const KINGBULL_DISCOVER_ST_URL = "https://www.kingbullbike.com/products/kingbull-discover-st2-0-premium-off-road-city-electric-bike";
 const KINGBULL_DISCOVER_ST_AWIN_URL = `${KINGBULL_AWIN_URL}&ued=${encodeURIComponent(KINGBULL_DISCOVER_ST_URL)}`;
-const KINGBULL_SOVRN_URL = "https://sovrn.co/0wdeadd";
+const KINGBULL_RANGER_URL = "https://sovrn.co/1f76den";
+const KINGBULL_SOVRN_URL = KINGBULL_RANGER_URL;
 const KINGBULL_COUPON_CODE = process.env.NEXT_PUBLIC_KINGBULL_COUPON_CODE || "GET50OFF";
 const KINGBULL_REDDIT_SEARCH_URL = "https://www.reddit.com/r/ebikes/search/?q=kingbull%20ranger&restrict_sr=1";
 
@@ -239,11 +240,13 @@ type FreeRideModel = {
   targetHeading: number;
   targetSpot: string | null;
   speed: number;
+  pedalPower: number;
   distance: number;
   remaining: number;
   parkScore: number;
   combo: number;
   pickupCooldown: number;
+  lastBoostSpot: string | null;
   voiceCooldown: number;
   submitted: boolean;
   terrain: string;
@@ -475,19 +478,40 @@ const DAILY_PARK_EVENTS = [
   { title: "Stream Skills", spot: "Stream Trail", terrain: "Stream", bonus: 840, color: "#5fcbea", detail: "Thread the stream edge cleanly." },
 ] as const;
 
-const FREE_RIDE_SPOTS = [
+type FreeRideSpot = {
+  name: string;
+  short: string;
+  x: number;
+  y: number;
+  color: string;
+  areas?: readonly RideArea[];
+};
+
+const FREE_RIDE_SPOTS: readonly FreeRideSpot[] = [
   { name: "Skate Bowl", short: "Skate", x: -720, y: -520, color: "#c9d4d7" },
   { name: "Courts", short: "Courts", x: 620, y: -500, color: "#d46a43" },
   { name: "Tennis Row", short: "Tennis", x: 285, y: -540, color: "#3da06f" },
   { name: "Soccer Fields", short: "Soccer", x: 760, y: 360, color: "#4a9b44" },
   { name: "Stream Trail", short: "Stream", x: -520, y: 420, color: "#5fcbea" },
+  { name: "Bike Cafe", short: "Cafe", x: -1080, y: -120, color: "#f6b65b", areas: ["park"] },
+  { name: "Dog Park", short: "Dog Run", x: 1040, y: -80, color: "#9ff28a", areas: ["park"] },
+  { name: "Amphitheater", short: "Stage", x: -920, y: 760, color: "#c4b5fd", areas: ["park"] },
+  { name: "Food Trucks", short: "Trucks", x: 420, y: 1120, color: "#ffcc66", areas: ["park"] },
   { name: "Pine Loop", short: "Pines", x: 80, y: -980, color: "#2e714d" },
   { name: "North Meadow", short: "Meadow", x: -1180, y: -1320, color: "#b7ef66" },
   { name: "Boardwalk", short: "Boards", x: -1280, y: 1040, color: "#c59a5d" },
   { name: "Pump Track", short: "Pump", x: 1280, y: 880, color: "#ff8b4a" },
   { name: "Lookout", short: "Lookout", x: 1150, y: -1360, color: "#a2ff9a" },
   { name: "Garden Loop", short: "Garden", x: -250, y: 1360, color: "#ff9ec7" },
-  { name: "E-Bike Land", short: "Glow", x: 1010, y: -890, color: "#ff7adf" },
+  { name: "Ranger Station", short: "Ranger", x: -1440, y: -540, color: "#d7b171", areas: ["statePark"] },
+  { name: "Cedar Bridge", short: "Bridge", x: 360, y: 250, color: "#c59a5d", areas: ["statePark"] },
+  { name: "Lake Pier", short: "Pier", x: 1380, y: 20, color: "#7cf2ff", areas: ["statePark"] },
+  { name: "Ridge Camp", short: "Camp", x: 780, y: -1220, color: "#fbe764", areas: ["statePark"] },
+  { name: "E-Bike Land", short: "Glow", x: 1010, y: -890, color: "#ff7adf", areas: ["bikeLand"] },
+  { name: "Neon Tunnel", short: "Tunnel", x: -960, y: -760, color: "#7cf2ff", areas: ["bikeLand"] },
+  { name: "Jump Yard", short: "Jumps", x: 1260, y: 1180, color: "#ff8b4a", areas: ["bikeLand"] },
+  { name: "Charge Plaza", short: "Charge", x: -1180, y: 1180, color: "#fbe764", areas: ["bikeLand"] },
+  { name: "Club Garage", short: "Garage", x: 1460, y: -320, color: "#c4b5fd", areas: ["bikeLand"] },
   { name: "Trailhead", short: "Start", x: 0, y: 0, color: "#fbe764" },
 ] as const;
 
@@ -763,10 +787,15 @@ function missionStatus(game: GameModel) {
   };
 }
 
-function freeRideZone(x: number, y: number) {
-  let best: (typeof FREE_RIDE_SPOTS)[number] = FREE_RIDE_SPOTS[0];
+function freeRideSpots(area: RideArea) {
+  return FREE_RIDE_SPOTS.filter((spot) => !spot.areas || spot.areas.includes(area));
+}
+
+function freeRideZoneForArea(x: number, y: number, area: RideArea) {
+  const spots = freeRideSpots(area);
+  let best = spots[0] ?? FREE_RIDE_SPOTS[0];
   let bestDistance = Number.POSITIVE_INFINITY;
-  for (const spot of FREE_RIDE_SPOTS) {
+  for (const spot of spots) {
     const distance = Math.hypot(x - spot.x, y - spot.y);
     if (distance < bestDistance) {
       best = spot;
@@ -778,11 +807,12 @@ function freeRideZone(x: number, y: number) {
 
 function nextFreeRideSpot(free: FreeRideModel) {
   if (free.targetSpot && !free.visitedZones.includes(free.targetSpot)) {
-    const target = FREE_RIDE_SPOTS.find((spot) => spot.name === free.targetSpot);
+    const target = freeRideSpots(free.area).find((spot) => spot.name === free.targetSpot);
     if (target) return { ...target, distance: Math.hypot(free.x - target.x, free.y - target.y) };
   }
-  const candidates = FREE_RIDE_SPOTS.filter((spot) => spot.name !== "Trailhead" && !free.visitedZones.includes(spot.name));
-  const pool = candidates.length > 0 ? candidates : FREE_RIDE_SPOTS.filter((spot) => spot.name !== "Trailhead");
+  const available = freeRideSpots(free.area);
+  const candidates = available.filter((spot) => spot.name !== "Trailhead" && !free.visitedZones.includes(spot.name));
+  const pool = candidates.length > 0 ? candidates : available.filter((spot) => spot.name !== "Trailhead");
   return pool
     .map((spot) => ({ ...spot, distance: Math.hypot(free.x - spot.x, free.y - spot.y) }))
     .sort((a, b) => a.distance - b.distance)[0];
@@ -821,7 +851,17 @@ function freeRideTerrain(x: number, y: number, area: RideArea) {
   const pathDistance = Math.min(...FREE_RIDE_PATHS.map((path) => distanceToPath(x, y, path)));
   const pumpDistance = Math.hypot(x - 1280, y - 880);
   const boardwalkDistance = Math.hypot(x + 1280, y - 1040);
+  const lakeDistance = Math.hypot(x - 1380, y - 20);
+  const bridgeDistance = Math.hypot(x - 360, y - 250);
+  const tunnelDistance = Math.hypot(x + 960, y + 760);
+  const chargeDistance = Math.hypot(x + 1180, y - 1180);
+  const jumpDistance = Math.hypot(x - 1260, y - 1180);
   if (streamDistance < 54) return { label: "Stream", short: "water", drag: 54, score: 0.08, warning: true };
+  if (area === "statePark" && lakeDistance < 190) return { label: "Lake Edge", short: "lake", drag: 28, score: 0.12, warning: false };
+  if (area === "statePark" && bridgeDistance < 175) return { label: "Bridge", short: "bridge", drag: 5, score: 0.2, warning: false };
+  if (area === "bikeLand" && tunnelDistance < 230) return { label: "Neon", short: "neon", drag: -10, score: 0.24, warning: false };
+  if (area === "bikeLand" && chargeDistance < 210) return { label: "Charge", short: "charge", drag: -7, score: 0.22, warning: false };
+  if (area === "bikeLand" && jumpDistance < 230) return { label: "Jumps", short: "jumps", drag: -12, score: 0.25, warning: false };
   if (pumpDistance < 170) return { label: "Pump", short: "pump", drag: -14, score: 0.22, warning: false };
   if (boardwalkDistance < 190) return { label: "Boardwalk", short: "boards", drag: 8, score: 0.18, warning: false };
   if (area === "statePark" && y < -680 && pathDistance < 92) return { label: "Downhill", short: "hill", drag: -10, score: 0.18, warning: false };
@@ -830,9 +870,9 @@ function freeRideTerrain(x: number, y: number, area: RideArea) {
 }
 
 function freeRideObjectives(free: FreeRideModel): ParkObjective[] {
-  const zoneTarget = free.area === "bikeLand" ? 7 : free.area === "statePark" ? 6 : 5;
-  const distanceTarget = free.area === "bikeLand" ? 1500 : free.area === "statePark" ? 1300 : 1100;
-  const comboTarget = free.area === "bikeLand" ? 8 : 6;
+  const zoneTarget = free.area === "bikeLand" ? 9 : free.area === "statePark" ? 8 : 7;
+  const distanceTarget = free.area === "bikeLand" ? 2100 : free.area === "statePark" ? 1850 : 1600;
+  const comboTarget = free.area === "bikeLand" ? 10 : free.area === "statePark" ? 8 : 7;
   const event = dailyParkEvent();
   const eventDone = free.visitedZones.includes(event.spot);
   return [
@@ -910,11 +950,13 @@ export default function CasterCycleApp() {
     targetHeading: -Math.PI / 2,
     targetSpot: null,
     speed: 0,
+    pedalPower: 0,
     distance: 0,
     remaining: FREE_ROAM_SECONDS,
     parkScore: 0,
     combo: 0,
     pickupCooldown: 0,
+    lastBoostSpot: null,
     voiceCooldown: 0,
     submitted: false,
     terrain: "Grass",
@@ -942,11 +984,13 @@ export default function CasterCycleApp() {
       targetHeading: -Math.PI / 2,
       targetSpot: null,
       speed: 0,
+      pedalPower: 0,
       distance: 0,
       remaining: FREE_ROAM_SECONDS,
       parkScore: 0,
       combo: 0,
       pickupCooldown: 0,
+      lastBoostSpot: null,
       voiceCooldown: 0,
       submitted: false,
       terrain: "Grass",
@@ -1483,12 +1527,14 @@ export default function CasterCycleApp() {
     free.heading = -Math.PI / 2;
     free.targetHeading = free.heading;
     free.targetSpot = destinationSpot;
-    free.speed = rideArea === "bikeLand" ? 250 : rideArea === "statePark" ? 230 : 210;
+    free.speed = rideArea === "bikeLand" ? 155 : rideArea === "statePark" ? 145 : 132;
+    free.pedalPower = 0.35;
     free.distance = 0;
     free.remaining = effectivePro ? FREE_ROAM_SECONDS : FREE_ROAM_SECONDS;
     free.parkScore = 0;
     free.combo = 0;
     free.pickupCooldown = 0;
+    free.lastBoostSpot = null;
     free.voiceCooldown = 0;
     free.submitted = false;
     free.terrain = rideArea === "bikeLand" ? "Pump" : rideArea === "statePark" ? "Downhill" : "Grass";
@@ -1513,7 +1559,7 @@ export default function CasterCycleApp() {
     if (freeRideActive) {
       const free = freeRideRef.current;
       free.targetHeading += direction * 0.34 * skinStats.turn;
-      free.speed = clamp(free.speed + 18 * skinStats.boost, 0, (effectivePro ? 440 : 380) * skinStats.speed);
+      free.pedalPower = clamp(free.pedalPower + 0.08, 0, 1.25);
       syncFreeRideHud();
       haptic("light");
       playSfx("lane");
@@ -1529,12 +1575,13 @@ export default function CasterCycleApp() {
     syncHud();
     haptic("light");
     playSfx("lane");
-  }, [effectivePro, freeRideActive, playSfx, skinStats.boost, skinStats.speed, skinStats.turn, startRide, syncFreeRideHud, syncHud]);
+  }, [freeRideActive, playSfx, skinStats.turn, startRide, syncFreeRideHud, syncHud]);
 
   const boostOrHop = useCallback(() => {
     if (freeRideActive) {
       const free = freeRideRef.current;
-      free.speed = clamp(free.speed + 72 * skinStats.boost, 0, (effectivePro ? 460 : 395) * skinStats.speed);
+      free.pedalPower = clamp(free.pedalPower + 0.42 * skinStats.boost, 0, 1.45);
+      free.speed = clamp(free.speed + 18 * skinStats.boost, 42, (effectivePro ? 335 : 305) * skinStats.speed);
       syncFreeRideHud();
       haptic("medium");
       playSfx("boost");
@@ -1556,9 +1603,33 @@ export default function CasterCycleApp() {
     }
   }, [effectivePro, freeRideActive, playSfx, skinStats.boost, skinStats.speed, startRide, syncFreeRideHud, syncHud]);
 
+  const steerFreeRideToPoint = useCallback((rect: DOMRect, x: number, y: number, impulse: number) => {
+    const free = freeRideRef.current;
+    const centerX = rect.width / 2;
+    const centerY = rect.height * 0.56;
+    const targetAngle = Math.atan2(y - centerY, x - centerX);
+    const distance = Math.hypot(x - centerX, y - centerY);
+    free.targetHeading = targetAngle;
+    free.pedalPower = clamp(free.pedalPower + clamp(distance / 260, 0.08, 0.6) * impulse * 0.004, 0, 1.2);
+    free.speed = clamp(free.speed + clamp(distance / 280, 0.08, 0.5) * impulse * 0.12, 42, (effectivePro ? 330 : 300) * skinStats.speed);
+    syncFreeRideHud();
+  }, [effectivePro, skinStats.speed, syncFreeRideHud]);
+
   const handleCoursePointerDown = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
     coursePointerRef.current = { x: event.clientX, y: event.clientY };
-  }, []);
+    if (freeRideActive) {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      const rect = event.currentTarget.getBoundingClientRect();
+      steerFreeRideToPoint(rect, event.clientX - rect.left, event.clientY - rect.top, 8);
+      haptic("selection");
+    }
+  }, [freeRideActive, steerFreeRideToPoint]);
+
+  const handleCoursePointerMove = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
+    if (!freeRideActive || !coursePointerRef.current) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    steerFreeRideToPoint(rect, event.clientX - rect.left, event.clientY - rect.top, 2);
+  }, [freeRideActive, steerFreeRideToPoint]);
 
   const handleCoursePointerUp = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
     const start = coursePointerRef.current;
@@ -1570,13 +1641,7 @@ export default function CasterCycleApp() {
     const dy = start ? event.clientY - start.y : 0;
 
     if (freeRideActive) {
-      const free = freeRideRef.current;
-      const centerX = rect.width / 2;
-      const centerY = rect.height * 0.58;
-      const targetAngle = Math.atan2(y - centerY, x - centerX);
-      free.targetHeading = targetAngle;
-      free.speed = clamp(free.speed + (Math.abs(dx) + Math.abs(dy) > 18 ? 54 : 30) * skinStats.boost, 90, (effectivePro ? 455 : 390) * skinStats.speed);
-      syncFreeRideHud();
+      steerFreeRideToPoint(rect, x, y, Math.abs(dx) + Math.abs(dy) > 18 ? 14 : 7);
       haptic("selection");
       return;
     }
@@ -1589,7 +1654,7 @@ export default function CasterCycleApp() {
     if (x < rect.width * 0.34) changeLane(-1);
     else if (x > rect.width * 0.66) changeLane(1);
     else boostOrHop();
-  }, [boostOrHop, changeLane, effectivePro, freeRideActive, skinStats.boost, skinStats.speed, syncFreeRideHud]);
+  }, [boostOrHop, changeLane, freeRideActive, steerFreeRideToPoint]);
 
   const shareCast = useCallback(async (text: string, embeds: [] | [string] | [string, string], copiedText = "Share copied") => {
     const finalText = text.trimEnd().endsWith(SHARE_URL) ? text.trimEnd() : `${text.trimEnd()}\n${SHARE_URL}`;
@@ -1844,11 +1909,38 @@ export default function CasterCycleApp() {
         if (free.messageT > 0) free.messageT = Math.max(0, free.messageT - dt);
         if (free.pickupCooldown > 0) free.pickupCooldown = Math.max(0, free.pickupCooldown - dt);
         const terrain = freeRideTerrain(free.x, free.y, free.area);
+        free.pedalPower = Math.max(0, free.pedalPower - dt * (terrain.label === "Downhill" ? 0.28 : 0.62));
         const parkEvent = dailyParkEvent(current.dateKey);
         free.terrain = terrain.label;
-        free.heading += angleDelta(free.heading, free.targetHeading) * Math.min(1, dt * 7.4);
+        const turnDelta = angleDelta(free.heading, free.targetHeading);
+        free.heading += turnDelta * Math.min(1, dt * (8.8 + clamp(free.speed / 260, 0, 1.4)));
         const terrainDrag = terrain.label === "Grass" ? terrain.drag * skinStats.grass : terrain.drag;
-        free.speed = clamp(free.speed - dt * terrainDrag, 0, (effectivePro ? 470 : 390) * skinStats.speed);
+        const terrainCruise =
+          terrain.label === "Path" ? 112 :
+          terrain.label === "Downhill" ? 176 :
+          terrain.label === "Pump" ? 126 :
+          terrain.label === "Boardwalk" ? 122 :
+          terrain.label === "Bridge" ? 130 :
+          terrain.label === "Neon" || terrain.label === "Charge" || terrain.label === "Jumps" ? 142 :
+          terrain.label === "Lake Edge" ? 72 :
+          terrain.label === "Stream" ? 50 :
+          78;
+        const pedalDrive =
+          terrain.label === "Path" ? 188 :
+          terrain.label === "Downhill" ? 144 :
+          terrain.label === "Pump" ? 220 :
+          terrain.label === "Boardwalk" ? 196 :
+          terrain.label === "Bridge" ? 198 :
+          terrain.label === "Neon" || terrain.label === "Charge" || terrain.label === "Jumps" ? 230 :
+          terrain.label === "Lake Edge" ? 118 :
+          terrain.label === "Stream" ? 76 :
+          142;
+        const turnDrag = Math.min(42, Math.abs(turnDelta) * 18);
+        free.speed = clamp(
+          free.speed + ((terrainCruise + free.pedalPower * pedalDrive) * skinStats.speed - free.speed) * dt * 0.82 - dt * (terrainDrag + turnDrag),
+          42,
+          (effectivePro ? 335 : 305) * skinStats.speed,
+        );
         const move = free.speed * dt;
         const nextX = free.x + Math.cos(free.heading) * move;
         const nextY = free.y + Math.sin(free.heading) * move;
@@ -1871,7 +1963,7 @@ export default function CasterCycleApp() {
           free.message = "Stream edge slows you";
           free.messageT = 0.7;
         }
-        const nextZone = freeRideZone(free.x, free.y);
+        const nextZone = freeRideZoneForArea(free.x, free.y, free.area);
         if (nextZone !== free.zone) {
           free.zone = nextZone;
           if (!free.visitedZones.includes(nextZone)) {
@@ -1880,7 +1972,8 @@ export default function CasterCycleApp() {
             const eventBonus = nextZone === parkEvent.spot ? parkEvent.bonus : 0;
             const discoveryBonus = free.visitedZones.length >= 10 ? 900 : free.visitedZones.length >= 7 ? 560 : free.visitedZones.length >= 4 ? 320 : 0;
             free.parkScore += 260 + free.visitedZones.length * 45 + discoveryBonus + eventBonus;
-            free.speed = clamp(free.speed + 38 * skinStats.boost, 0, (effectivePro ? 455 : 380) * skinStats.speed);
+            free.pedalPower = clamp(free.pedalPower + 0.18 * skinStats.boost, 0, 1.45);
+            free.speed = clamp(free.speed + 22 * skinStats.boost, 42, (effectivePro ? 330 : 300) * skinStats.speed);
             free.message = eventBonus > 0 ? `${parkEvent.title} +${eventBonus}` : discoveryBonus > 0 ? `Discovery chain +${discoveryBonus}` : `New zone: ${nextZone}`;
             free.messageT = 1.6;
             haptic(eventBonus > 0 || discoveryBonus > 0 ? "success" : "light");
@@ -1891,12 +1984,15 @@ export default function CasterCycleApp() {
             }
           }
         }
-        const boostSpot = FREE_RIDE_SPOTS.find((spot) => spot.name !== "Trailhead" && Math.hypot(free.x - spot.x, free.y - spot.y) < 116);
-        if (boostSpot && free.pickupCooldown <= 0) {
+        const boostSpot = freeRideSpots(free.area).find((spot) => spot.name !== "Trailhead" && Math.hypot(free.x - spot.x, free.y - spot.y) < 116);
+        if (!boostSpot) free.lastBoostSpot = null;
+        if (boostSpot && free.pickupCooldown <= 0 && free.lastBoostSpot !== boostSpot.name) {
           free.pickupCooldown = 1.15;
+          free.lastBoostSpot = boostSpot.name;
           free.combo += 1;
           free.parkScore += 190 + free.combo * 28;
-          free.speed = clamp(free.speed + 86 * skinStats.boost, 0, (effectivePro ? 460 : 385) * skinStats.speed);
+          free.pedalPower = clamp(free.pedalPower + 0.34 * skinStats.boost, 0, 1.45);
+          free.speed = clamp(free.speed + 44 * skinStats.boost, 42, (effectivePro ? 335 : 305) * skinStats.speed);
           free.message = `${boostSpot.short} boost +${190 + free.combo * 28}`;
           free.messageT = 1.25;
           haptic("medium");
@@ -2153,6 +2249,7 @@ export default function CasterCycleApp() {
         aria-label="CasterCycle forward-scrolling e-bike game"
         className="absolute inset-0 h-full w-full touch-none"
         onPointerDown={handleCoursePointerDown}
+        onPointerMove={handleCoursePointerMove}
         onPointerCancel={() => {
           coursePointerRef.current = null;
         }}
@@ -2220,7 +2317,7 @@ export default function CasterCycleApp() {
         <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 px-3">
           <ObjectiveStrip objectives={freeRideHud.objectives} />
           <div className="grid grid-cols-4 gap-2">
-            <Metric icon={<Gauge size={14} />} label="mph" value={String(Math.round(freeRideHud.speed / 8))} />
+            <Metric icon={<Gauge size={14} />} label="mph" value={String(Math.round(freeRideHud.speed / 11))} />
             <Metric icon={<Trophy size={14} />} label="score" value={Math.round(freeRideHud.score).toLocaleString()} />
             <Metric icon={<Flame size={14} />} label="combo" value={`${freeRideHud.combo}x`} />
             <Metric icon={<Map size={14} />} label="surface" value={freeRideHud.terrain} />
@@ -2376,6 +2473,20 @@ export default function CasterCycleApp() {
                       onShare={hud.phase === "finished" ? shareRide : shareApp}
                     />
 
+                    <PremiumWorldTeaser
+                      proActive={effectivePro}
+                      onShop={() => setDashboardTab("shop")}
+                      onGarage={() => setDashboardTab("garage")}
+                    />
+
+                    <DashboardRangerCard
+                      onQuest={() => {
+                        haptic("selection");
+                        setDashboardTab("quest");
+                      }}
+                      onDeal={() => openExternal(KINGBULL_RANGER_URL)}
+                    />
+
                     {lastRecap && (
                       <RideRecapPanel
                         recap={lastRecap}
@@ -2446,7 +2557,7 @@ export default function CasterCycleApp() {
                 {dashboardTab === "garage" && (
                   <>
                     <AreaPicker selected={rideArea} proActive={effectivePro} lifetimeActive={annualActive} onSelect={chooseRideArea} />
-                    <DestinationPicker selected={destinationSpot} onSelect={setDestinationSpot} />
+                    <DestinationPicker area={rideArea} selected={destinationSpot} onSelect={setDestinationSpot} />
                     <SkinPicker skins={SKINS} selected={selectedSkin} isUnlocked={skinUnlocked} onSelect={setSelectedSkin} />
                   </>
                 )}
@@ -2840,6 +2951,78 @@ function WorldHub({
   );
 }
 
+function DashboardRangerCard({ onQuest, onDeal }: { onQuest: () => void; onDeal: () => void }) {
+  return (
+    <div className="mt-3 rounded-md border border-[#fbe764]/24 bg-[#fbe764]/10 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <button className="min-w-0 flex-1 text-left active:scale-[0.99]" onClick={onQuest}>
+          <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#fbe764]">
+            <Sparkles size={13} />
+            side quest
+          </span>
+          <span className="mt-1 block truncate text-sm font-black text-white">Kingbull Ranger Fan Garage</span>
+          <span className="mt-0.5 block truncate text-[11px] font-semibold text-white/54">$799 sale callout, videos, specs, chat.</span>
+        </button>
+        <button
+          className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-md bg-[#fbe764] px-3 text-[10px] font-black uppercase text-[#071018] active:scale-[0.98]"
+          onClick={onDeal}
+        >
+          Deal
+          <ExternalLink size={12} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PremiumWorldTeaser({ proActive, onShop, onGarage }: { proActive: boolean; onShop: () => void; onGarage: () => void }) {
+  return (
+    <div className="mt-3 overflow-hidden rounded-md border border-[#ff7adf]/30 bg-[linear-gradient(135deg,rgba(255,122,223,0.16),rgba(124,242,255,0.10)_48%,rgba(251,231,100,0.10))]">
+      <button className="block w-full p-3 text-left active:scale-[0.99]" onClick={proActive ? onGarage : onShop}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#ff9ee6]">
+              <Crown size={13} />
+              {proActive ? "unlocked world" : "premium world"}
+            </div>
+            <div className="mt-1 truncate text-lg font-black leading-tight text-white">E-Bike Land</div>
+            <div className="mt-1 text-xs font-semibold leading-5 text-white/62">
+              Neon Tunnel, Jump Yard, Charge Plaza, Garage, unlimited roaming.
+            </div>
+          </div>
+          <div className="shrink-0 rounded-md border border-[#fbe764]/30 bg-[#fbe764]/14 px-2 py-1 text-right">
+            <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#fbe764]">{proActive ? "ready" : "pass"}</div>
+            <div className="text-sm font-black text-white">{proActive ? "Ride" : "$1/$7"}</div>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-4 gap-1.5">
+          {[
+            ["Tunnel", "#7cf2ff"],
+            ["Jumps", "#ff8b4a"],
+            ["Charge", "#fbe764"],
+            ["Garage", "#c4b5fd"],
+          ].map(([label, color]) => (
+            <span key={label} className="min-h-10 rounded-md border border-white/10 bg-black/18 px-1.5 py-1.5">
+              <span className="block h-1.5 w-full rounded-full" style={{ backgroundColor: color }} />
+              <span className="mt-1 block truncate text-[9px] font-black uppercase tracking-[0.04em] text-white/68">{label}</span>
+            </span>
+          ))}
+        </div>
+      </button>
+      {!proActive && (
+        <div className="grid grid-cols-2 gap-2 border-t border-white/10 p-2">
+          <button className="min-h-9 rounded-md bg-[#fbe764] px-3 text-[10px] font-black uppercase text-[#071018] active:scale-[0.98]" onClick={onShop}>
+            Unlock
+          </button>
+          <button className="min-h-9 rounded-md border border-white/12 bg-white/8 px-3 text-[10px] font-black uppercase text-white/72 active:scale-[0.98]" onClick={onGarage}>
+            Preview
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AreaPicker({
   selected,
   proActive,
@@ -2897,9 +3080,9 @@ function AreaPicker({
   );
 }
 
-function DestinationPicker({ selected, onSelect }: { selected: string | null; onSelect: (spot: string | null) => void }) {
+function DestinationPicker({ area, selected, onSelect }: { area: RideArea; selected: string | null; onSelect: (spot: string | null) => void }) {
   const event = dailyParkEvent();
-  const spots = FREE_RIDE_SPOTS
+  const spots = freeRideSpots(area)
     .filter((spot) => spot.name !== "Trailhead")
     .sort((a, b) => (a.name === event.spot ? -1 : b.name === event.spot ? 1 : 0));
   return (
@@ -3646,10 +3829,10 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
         </div>
 
         <div className="mt-3 grid grid-cols-3 gap-2">
-          <button className="min-h-10 rounded-md bg-[#fbe764] px-2 text-[10px] font-black uppercase text-[#071018]" onClick={() => onOpen(KINGBULL_AWIN_URL)}>
+          <button className="min-h-10 rounded-md bg-[#fbe764] px-2 text-[10px] font-black uppercase text-[#071018]" onClick={() => onOpen(KINGBULL_RANGER_URL)}>
             Buy Ranger
           </button>
-          <button className="min-h-10 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/14 px-2 text-[10px] font-black uppercase text-white" onClick={() => onOpen(KINGBULL_AWIN_URL)}>
+          <button className="min-h-10 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/14 px-2 text-[10px] font-black uppercase text-white" onClick={() => onOpen(KINGBULL_RANGER_URL)}>
             Deals
           </button>
           <button className="min-h-10 rounded-md border border-white/12 bg-white/8 px-2 text-[10px] font-black uppercase text-white/76" onClick={onShare}>
@@ -3684,7 +3867,7 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
           </div>
         </div>
         <div className="mt-3 grid grid-cols-2 gap-2">
-          <button className="min-h-10 rounded-md bg-[#fbe764] px-3 text-xs font-black uppercase text-[#071018]" onClick={() => onOpen(KINGBULL_AWIN_URL)}>
+          <button className="min-h-10 rounded-md bg-[#fbe764] px-3 text-xs font-black uppercase text-[#071018]" onClick={() => onOpen(KINGBULL_RANGER_URL)}>
             Buy with deal
           </button>
           <button
@@ -3739,16 +3922,13 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
                 Close
               </button>
             </div>
-            <div className="aspect-video bg-black">
-              <iframe
-                className="h-full w-full"
-                src="https://www.youtube-nocookie.com/embed/7u2pJWIHby8?rel=0&modestbranding=1&playsinline=1"
-                title="Happy CasterCycle video"
-                loading="lazy"
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
-              />
-            </div>
+            <VideoPreviewButton
+              id="7u2pJWIHby8"
+              title="Happy CasterCycle video"
+              subtitle="YouTube opens on tap"
+              aspect="video"
+              onOpen={() => onOpen("https://www.youtube.com/watch?v=7u2pJWIHby8")}
+            />
             <div className="grid grid-cols-2 gap-2 p-3">
               <button className="min-h-10 rounded-md bg-[#fbe764] px-3 text-xs font-black uppercase text-[#071018]" onClick={() => onOpen("https://www.youtube.com/watch?v=7u2pJWIHby8")}>
                 Open YouTube
@@ -3840,7 +4020,7 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
         <div className="mb-2 flex items-center justify-between gap-2 px-1">
           <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/46">
             <Play size={12} />
-            watch in app
+            watch previews
           </div>
           <button className="inline-flex items-center gap-1 text-[10px] font-black uppercase text-[#7cf2ff]" onClick={() => onOpen("https://www.youtube.com/results?search_query=Kingbull+Ranger+ebike+review")}>
             More <ExternalLink size={11} />
@@ -3849,16 +4029,13 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
         <div className="space-y-2">
           {RANGER_VIDEOS.map((video) => (
             <div key={video.id} className="overflow-hidden rounded-md border border-white/10 bg-black/24">
-              <div className="aspect-video w-full bg-black">
-                <iframe
-                  className="h-full w-full"
-                  src={`https://www.youtube-nocookie.com/embed/${video.id}?rel=0&modestbranding=1&playsinline=1`}
-                  title={video.title}
-                  loading="lazy"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowFullScreen
-                />
-              </div>
+              <VideoPreviewButton
+                id={video.id}
+                title={video.title}
+                subtitle={video.channel}
+                aspect="video"
+                onOpen={() => onOpen(`https://www.youtube.com/watch?v=${video.id}`)}
+              />
               <div className="flex items-center justify-between gap-2 px-2 py-2">
                 <div className="min-w-0">
                   <div className="truncate text-xs font-black text-white">{video.title}</div>
@@ -3886,16 +4063,13 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
         <div className="grid grid-cols-2 gap-2">
           {RANGER_SHORTS.map((video) => (
             <div key={video.id} className="overflow-hidden rounded-md border border-white/10 bg-black/24">
-              <div className="aspect-[9/16] w-full bg-black">
-                <iframe
-                  className="h-full w-full"
-                  src={`https://www.youtube-nocookie.com/embed/${video.id}?rel=0&modestbranding=1&playsinline=1`}
-                  title={video.title}
-                  loading="lazy"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                  allowFullScreen
-                />
-              </div>
+              <VideoPreviewButton
+                id={video.id}
+                title={video.title}
+                subtitle="Short"
+                aspect="short"
+                onOpen={() => onOpen(`https://www.youtube.com/shorts/${video.id}`)}
+              />
               <div className="flex items-center justify-between gap-2 px-2 py-2">
                 <div className="min-w-0 truncate text-[10px] font-black text-white">{video.title}</div>
                 <button className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-white/12 bg-white/8 px-2 text-[8px] font-black uppercase text-white/70" onClick={() => onOpen(`https://www.youtube.com/shorts/${video.id}`)}>
@@ -3908,9 +4082,9 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2">
-        <button className="min-h-11 rounded-md border border-white/12 bg-white/8 px-3 text-left active:scale-[0.98]" onClick={() => onOpen(KINGBULL_AWIN_URL)}>
+        <button className="min-h-11 rounded-md border border-white/12 bg-white/8 px-3 text-left active:scale-[0.98]" onClick={() => onOpen(KINGBULL_RANGER_URL)}>
           <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-[#7cf2ff]">affiliate</span>
-          <span className="mt-1 block text-xs font-black text-white">Promo link</span>
+          <span className="mt-1 block text-xs font-black text-white">Ranger link</span>
         </button>
         <button className="min-h-11 rounded-md border border-white/12 bg-white/8 px-3 text-left active:scale-[0.98]" onClick={() => onOpen(KINGBULL_REDDIT_SEARCH_URL)}>
           <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-[#fbe764]">community</span>
@@ -3921,7 +4095,7 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
       <div className="mt-3 rounded-md border border-[#fbe764]/24 bg-[#fbe764]/10 p-3">
         <div className="flex items-start gap-3">
           <Image
-            src="/media/awin-qrcode.png"
+            src="/media/kingbull-ranger-qr.png"
             alt="Kingbull affiliate promo QR code"
             width={96}
             height={96}
@@ -3938,7 +4112,7 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
             </div>
             <button
               className="mt-2 min-h-9 rounded-md bg-[#fbe764] px-3 text-[10px] font-black uppercase text-[#071018]"
-              onClick={() => onOpen(KINGBULL_AWIN_URL)}
+              onClick={() => onOpen(KINGBULL_RANGER_URL)}
             >
               Open promo
             </button>
@@ -3956,6 +4130,42 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
         </div>
       </div>
     </div>
+  );
+}
+
+function VideoPreviewButton({
+  id,
+  title,
+  subtitle,
+  aspect,
+  onOpen,
+}: {
+  id: string;
+  title: string;
+  subtitle: string;
+  aspect: "video" | "short";
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      className={`group relative block w-full overflow-hidden bg-[#071018] text-left active:scale-[0.99] ${aspect === "short" ? "aspect-[9/16]" : "aspect-video"}`}
+      style={{
+        backgroundImage: `linear-gradient(180deg,rgba(7,16,24,0.04),rgba(7,16,24,0.78)),url("https://i.ytimg.com/vi/${id}/hqdefault.jpg")`,
+        backgroundPosition: "center",
+        backgroundSize: "cover",
+      }}
+      onClick={onOpen}
+    >
+      <span className="absolute inset-0 flex items-center justify-center">
+        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#fbe764] text-[#071018] shadow-[0_14px_34px_rgba(0,0,0,0.34)] transition group-active:scale-95">
+          <Play size={22} fill="currentColor" />
+        </span>
+      </span>
+      <span className="absolute inset-x-0 bottom-0 p-2">
+        <span className="block truncate text-xs font-black text-white">{title}</span>
+        <span className="mt-0.5 block truncate text-[10px] font-bold uppercase tracking-[0.08em] text-white/58">{subtitle}</span>
+      </span>
+    </button>
   );
 }
 
@@ -4094,6 +4304,30 @@ function UpgradePanel({
             <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.06em] text-white/42">{detail}</div>
           </div>
         ))}
+      </div>
+      <div className="mt-3 rounded-md border border-[#ff7adf]/28 bg-[#ff7adf]/10 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.14em] text-[#ff9ee6]">
+              <Zap size={13} />
+              E-Bike Land preview
+            </div>
+            <div className="mt-1 truncate text-sm font-black text-white">Premium neon freeride world</div>
+          </div>
+          <div className="shrink-0 rounded bg-black/24 px-2 py-1 text-[10px] font-black uppercase text-[#fbe764]">included</div>
+        </div>
+        <div className="mt-2 grid grid-cols-3 gap-1.5">
+          {[
+            ["9", "spots"],
+            ["boost", "pads"],
+            ["paid", "lounge"],
+          ].map(([value, label]) => (
+            <div key={label} className="rounded-md border border-white/10 bg-black/16 px-2 py-2 text-center">
+              <div className="text-sm font-black text-white">{value}</div>
+              <div className="text-[8px] font-black uppercase tracking-[0.08em] text-white/42">{label}</div>
+            </div>
+          ))}
+        </div>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <button
@@ -4239,14 +4473,16 @@ function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height:
   ctx.scale(width < 440 ? 0.74 : 0.82, width < 440 ? 0.74 : 0.82);
   ctx.translate(-free.x, -free.y);
   drawFreestyleMap(ctx, now, free);
+  if (nextSpot) drawFreeRideTargetTrail(ctx, free, nextSpot, now);
   ctx.restore();
 
+  drawFreeRideMotionFx(ctx, width / 2, height * 0.56, free, skin, now);
   drawFreeRidePlayer(ctx, width / 2, height * 0.56, free.heading, skin, now);
 
   ctx.fillStyle = "rgba(7,16,24,0.62)";
   ctx.strokeStyle = unlimited ? "#a2ff9a" : "#fbe764";
   ctx.lineWidth = 2;
-  roundRect(ctx, 14, height * 0.13, Math.min(width - 28, 330), 54, 10);
+  roundRect(ctx, 14, height * 0.13, Math.min(width - 118, 300), 54, 10);
   ctx.fill();
   ctx.stroke();
   ctx.fillStyle = unlimited ? "#a2ff9a" : "#fbe764";
@@ -4277,21 +4513,21 @@ function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height:
     ctx.restore();
   }
 
-  const compassX = width - 58;
-  const compassY = height * 0.19;
+  const compassX = width - 52;
+  const compassY = height * 0.2;
   ctx.save();
   ctx.translate(compassX, compassY);
   ctx.fillStyle = "rgba(7,16,24,0.58)";
   ctx.beginPath();
-  ctx.arc(0, 0, 34, 0, Math.PI * 2);
+  ctx.arc(0, 0, 28, 0, Math.PI * 2);
   ctx.fill();
   ctx.rotate(free.heading + Math.PI / 2);
   ctx.fillStyle = "#fbe764";
   ctx.beginPath();
-  ctx.moveTo(0, -24);
-  ctx.lineTo(10, 10);
+  ctx.moveTo(0, -20);
+  ctx.lineTo(9, 9);
   ctx.lineTo(0, 4);
-  ctx.lineTo(-10, 10);
+  ctx.lineTo(-9, 9);
   ctx.closePath();
   ctx.fill();
   ctx.restore();
@@ -4332,10 +4568,10 @@ function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height:
 }
 
 function drawFreeRideMiniMap(ctx: CanvasRenderingContext2D, width: number, height: number, free: FreeRideModel, unlimited: boolean) {
-  const mapW = Math.min(154, width * 0.32);
+  const mapW = Math.min(136, width * 0.28);
   const mapH = mapW;
   const x = width - mapW - 14;
-  const y = height * 0.28;
+  const y = height * 0.31;
   const scale = mapW / (FREE_RIDE_WORLD_LIMIT * 2);
 
   ctx.save();
@@ -4362,7 +4598,7 @@ function drawFreeRideMiniMap(ctx: CanvasRenderingContext2D, width: number, heigh
     ctx.stroke();
   }
 
-  for (const spot of FREE_RIDE_SPOTS) {
+  for (const spot of freeRideSpots(free.area)) {
     if (spot.name === "Trailhead") continue;
     ctx.fillStyle = spot.color;
     ctx.beginPath();
@@ -4381,10 +4617,11 @@ function drawFreeRideMiniMap(ctx: CanvasRenderingContext2D, width: number, heigh
 }
 
 function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: FreeRideModel) {
-  ctx.fillStyle = free.area === "statePark" ? "#4f9b66" : "#69bd68";
+  const bikeLand = free.area === "bikeLand";
+  ctx.fillStyle = bikeLand ? "#263566" : free.area === "statePark" ? "#4f9b66" : "#69bd68";
   ctx.fillRect(-FREE_RIDE_WORLD_LIMIT, -FREE_RIDE_WORLD_LIMIT, FREE_RIDE_WORLD_LIMIT * 2, FREE_RIDE_WORLD_LIMIT * 2);
 
-  ctx.strokeStyle = "rgba(13,61,50,0.18)";
+  ctx.strokeStyle = bikeLand ? "rgba(124,242,255,0.14)" : "rgba(13,61,50,0.18)";
   ctx.lineWidth = 2;
   for (let x = -FREE_RIDE_WORLD_LIMIT; x <= FREE_RIDE_WORLD_LIMIT; x += 160) {
     ctx.beginPath();
@@ -4425,7 +4662,7 @@ function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: Free
     ctx.restore();
   }
 
-  ctx.strokeStyle = "#5fcbea";
+  ctx.strokeStyle = bikeLand ? "rgba(124,242,255,0.74)" : "#5fcbea";
   ctx.lineWidth = 42;
   ctx.lineCap = "round";
   ctx.beginPath();
@@ -4464,8 +4701,8 @@ function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: Free
     }
   }
 
-  ctx.strokeStyle = "#314f46";
-  ctx.lineWidth = 34;
+  ctx.strokeStyle = bikeLand ? "#182148" : "#314f46";
+  ctx.lineWidth = bikeLand ? 38 : 34;
   for (const path of FREE_RIDE_PATHS) {
     ctx.beginPath();
     path.forEach(([x, y], index) => {
@@ -4474,9 +4711,9 @@ function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: Free
     });
     ctx.stroke();
   }
-  ctx.strokeStyle = "#fbe764";
-  ctx.lineWidth = 4;
-  ctx.setLineDash([28, 34]);
+  ctx.strokeStyle = bikeLand ? "#ff7adf" : "#fbe764";
+  ctx.lineWidth = bikeLand ? 5 : 4;
+  ctx.setLineDash(bikeLand ? [20, 22] : [28, 34]);
   for (const path of FREE_RIDE_PATHS) {
     ctx.beginPath();
     path.forEach(([x, y], index) => {
@@ -4498,9 +4735,10 @@ function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: Free
   drawFreestyleCourt(ctx, 1280, 880, 360, 220, "#ce6847", "PUMP");
   drawFreestyleCourt(ctx, 1150, -1360, 320, 180, "#7ebf8f", "LOOKOUT");
   drawFreestyleCourt(ctx, -250, 1360, 300, 210, "#d9699b", "GARDEN");
+  drawAreaLandmarks(ctx, free, now);
   drawFreestyleTerrainDetails(ctx, now, free);
 
-  for (const spot of FREE_RIDE_SPOTS) {
+  for (const spot of freeRideSpots(free.area)) {
     if (spot.name === "Trailhead") continue;
     drawFreestyleBoostPad(ctx, spot.x, spot.y, spot.color, free.visitedZones.includes(spot.name), now);
   }
@@ -4538,6 +4776,171 @@ function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: Free
   ctx.stroke();
   ctx.shadowBlur = 0;
   drawFreestyleLabel(ctx, 1010, -890, "E-BIKE LAND");
+}
+
+function drawFreeRideTargetTrail(
+  ctx: CanvasRenderingContext2D,
+  free: FreeRideModel,
+  nextSpot: (typeof FREE_RIDE_SPOTS)[number] & { distance: number },
+  now: number,
+) {
+  const angle = Math.atan2(nextSpot.y - free.y, nextSpot.x - free.x);
+  const distance = Math.min(nextSpot.distance, 760);
+  const steps = Math.max(3, Math.min(9, Math.floor(distance / 82)));
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (let index = 1; index <= steps; index += 1) {
+    const t = index / (steps + 1);
+    const pulse = 0.55 + Math.sin(now / 180 + index * 0.8) * 0.45;
+    const x = free.x + Math.cos(angle) * distance * t;
+    const y = free.y + Math.sin(angle) * distance * t;
+    ctx.fillStyle = index === steps ? nextSpot.color : `rgba(251,231,100,${0.18 + pulse * 0.16})`;
+    ctx.beginPath();
+    ctx.arc(x, y, 10 + pulse * 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.strokeStyle = `${nextSpot.color}88`;
+  ctx.lineWidth = 4;
+  ctx.setLineDash([18, 24]);
+  ctx.beginPath();
+  ctx.moveTo(free.x + Math.cos(angle) * 80, free.y + Math.sin(angle) * 80);
+  ctx.lineTo(free.x + Math.cos(angle) * distance, free.y + Math.sin(angle) * distance);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawFreeRideMotionFx(ctx: CanvasRenderingContext2D, x: number, y: number, free: FreeRideModel, skin: Skin, now: number) {
+  const speed = clamp(free.speed / 305, 0, 1);
+  const pedal = clamp(free.pedalPower, 0, 1);
+  const dustColor = free.terrain === "Stream" ? "rgba(124,242,255," : free.terrain === "Path" || free.terrain === "Boardwalk" ? "rgba(251,231,100," : "rgba(214,255,180,";
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(free.heading);
+  ctx.globalCompositeOperation = "lighter";
+
+  for (let index = 0; index < 9; index += 1) {
+    const phase = (now / (150 - speed * 44) + index * 29) % 120;
+    const back = 30 + phase * (0.75 + speed * 0.7);
+    const side = Math.sin(now / 170 + index * 1.7) * (9 + speed * 12);
+    ctx.fillStyle = `${dustColor}${0.08 + speed * 0.16})`;
+    ctx.beginPath();
+    ctx.ellipse(-back, side, 4 + speed * 9, 2 + speed * 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = skin.trail;
+  ctx.globalAlpha = 0.2 + pedal * 0.18;
+  ctx.lineWidth = 3 + pedal * 3;
+  ctx.lineCap = "round";
+  for (let index = 0; index < 3; index += 1) {
+    const offset = -13 + index * 13;
+    ctx.beginPath();
+    ctx.moveTo(-36, offset);
+    ctx.quadraticCurveTo(-76 - speed * 44, offset * 1.2, -132 - speed * 70, offset * 0.55);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawAreaLandmarks(ctx: CanvasRenderingContext2D, free: FreeRideModel, now: number) {
+  if (free.area === "park") {
+    drawFreestyleCourt(ctx, -1080, -120, 250, 150, "#d58f53", "CAFE");
+    drawFreestyleCourt(ctx, 1040, -80, 300, 190, "#7cc86a", "DOG RUN");
+    drawFreestyleCourt(ctx, -920, 760, 310, 170, "#7a6cc8", "STAGE");
+    drawFreestyleCourt(ctx, 420, 1120, 300, 150, "#dcb04c", "TRUCKS");
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,0.7)";
+    ctx.lineWidth = 4;
+    for (let i = 0; i < 5; i += 1) {
+      ctx.beginPath();
+      ctx.arc(-920, 760, 48 + i * 23, Math.PI * 1.05, Math.PI * 1.95);
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#ff5d73";
+    for (let i = 0; i < 4; i += 1) {
+      roundRect(ctx, 306 + i * 74, 1065, 52, 38, 7);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  if (free.area === "statePark") {
+    drawFreestyleCourt(ctx, -1440, -540, 300, 160, "#9b7347", "RANGER");
+    drawFreestyleCourt(ctx, 780, -1220, 260, 150, "#8a633a", "CAMP");
+
+    ctx.save();
+    ctx.fillStyle = "rgba(95,202,234,0.68)";
+    ctx.strokeStyle = "rgba(255,255,255,0.58)";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.ellipse(1380, 20, 280, 160, -0.18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    drawFreestyleLabel(ctx, 1380, 20, "LAKE");
+
+    ctx.strokeStyle = "#c59a5d";
+    ctx.lineWidth = 18;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(225, 224);
+    ctx.lineTo(495, 276);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(255,255,255,0.48)";
+    ctx.lineWidth = 4;
+    for (let i = 0; i < 5; i += 1) {
+      ctx.beginPath();
+      ctx.moveTo(650 + i * 46, -1288);
+      ctx.lineTo(682 + i * 46, -1242);
+      ctx.lineTo(618 + i * 46, -1242);
+      ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  if (free.area === "bikeLand") {
+    drawFreestyleCourt(ctx, -960, -760, 360, 180, "#2158a6", "TUNNEL");
+    drawFreestyleCourt(ctx, 1260, 1180, 360, 220, "#ce6847", "JUMPS");
+    drawFreestyleCourt(ctx, -1180, 1180, 310, 190, "#d4c644", "CHARGE");
+    drawFreestyleCourt(ctx, 1460, -320, 300, 170, "#7562d6", "GARAGE");
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < 7; i += 1) {
+      ctx.strokeStyle = i % 2 ? "rgba(255,122,223,0.72)" : "rgba(124,242,255,0.72)";
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(-1120 + i * 52, -830);
+      ctx.lineTo(-980 + i * 42, -690);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = "#fbe764";
+    ctx.lineWidth = 7;
+    ctx.lineCap = "round";
+    for (let i = 0; i < 6; i += 1) {
+      const x = 1120 + i * 58;
+      const lift = Math.sin(now / 170 + i) * 5;
+      ctx.beginPath();
+      ctx.moveTo(x - 42, 1180 + lift);
+      ctx.quadraticCurveTo(x - 10, 1118 + lift, x + 34, 1180 + lift);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = "rgba(251,231,100,0.75)";
+    ctx.lineWidth = 6;
+    for (let i = 0; i < 4; i += 1) {
+      ctx.beginPath();
+      ctx.arc(-1180, 1180, 58 + i * 28 + Math.sin(now / 240 + i) * 4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
 }
 
 function drawFreestyleTerrainDetails(ctx: CanvasRenderingContext2D, now: number, free: FreeRideModel) {
@@ -4645,52 +5048,111 @@ function drawFreestyleLabel(ctx: CanvasRenderingContext2D, x: number, y: number,
 
 function drawFreeRidePlayer(ctx: CanvasRenderingContext2D, x: number, y: number, heading: number, skin: Skin, now: number) {
   const pulse = 0.5 + Math.sin(now / 130) * 0.5;
+  const lean = Math.sin(now / 180) * 0.04;
   ctx.save();
   ctx.translate(x, y);
-  ctx.rotate(heading + Math.PI / 2);
+  ctx.rotate(heading + lean);
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
   ctx.strokeStyle = skin.trail;
   ctx.globalAlpha = 0.28 + pulse * 0.18;
-  ctx.lineWidth = 8;
+  ctx.lineWidth = 7;
   ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(-18, 38);
-  ctx.quadraticCurveTo(-28, 72, -18, 114);
-  ctx.moveTo(18, 38);
-  ctx.quadraticCurveTo(28, 72, 18, 114);
+  ctx.moveTo(-36, -7);
+  ctx.quadraticCurveTo(-78, -15, -126, -6);
+  ctx.moveTo(-36, 7);
+  ctx.quadraticCurveTo(-78, 15, -126, 6);
   ctx.stroke();
   ctx.restore();
+
   ctx.fillStyle = "rgba(0,0,0,0.28)";
   ctx.beginPath();
-  ctx.ellipse(0, 22, 34, 10, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, 12, 46, 13, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = "#ffffff";
-  ctx.lineWidth = 7;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.fillStyle = `${skin.battery}44`;
   ctx.beginPath();
-  ctx.arc(-22, 28, 16, 0, Math.PI * 2);
-  ctx.arc(22, 28, 16, 0, Math.PI * 2);
+  ctx.moveTo(34, 0);
+  ctx.lineTo(86, -18);
+  ctx.lineTo(86, 18);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  ctx.strokeStyle = "#f7fbff";
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.ellipse(-30, 0, 13, 20, 0, 0, Math.PI * 2);
+  ctx.ellipse(35, 0, 13, 20, 0, 0, Math.PI * 2);
   ctx.stroke();
+  ctx.strokeStyle = "rgba(7,16,24,0.82)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(-30, 0, 6, 12, 0, 0, Math.PI * 2);
+  ctx.ellipse(35, 0, 6, 12, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
   ctx.strokeStyle = skin.frame;
-  ctx.lineWidth = 8;
+  ctx.lineWidth = 7;
   ctx.lineCap = "round";
+  ctx.lineJoin = "round";
   ctx.beginPath();
-  ctx.moveTo(-22, 28);
-  ctx.lineTo(0, -12);
-  ctx.lineTo(22, 28);
-  ctx.moveTo(0, -12);
-  ctx.lineTo(0, 20);
+  ctx.moveTo(-30, 0);
+  ctx.lineTo(-2, -14);
+  ctx.lineTo(34, 0);
+  ctx.lineTo(-2, 14);
+  ctx.closePath();
+  ctx.moveTo(18, -15);
+  ctx.lineTo(42, -19);
+  ctx.moveTo(18, 15);
+  ctx.lineTo(42, 19);
   ctx.stroke();
+
   ctx.fillStyle = skin.battery;
-  roundRect(ctx, -16, -6, 32, 26, 6);
+  roundRect(ctx, -12, -10, 29, 20, 6);
   ctx.fill();
+  ctx.strokeStyle = "#071018";
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.arc(2, 0, 8, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.save();
+  ctx.rotate(now / 95);
+  ctx.strokeStyle = "#fbe764";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-10, 0);
+  ctx.lineTo(10, 0);
+  ctx.moveTo(0, -10);
+  ctx.lineTo(0, 10);
+  ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = "#071018";
+  ctx.globalAlpha = 0.36;
+  roundRect(ctx, -5, -5, 14, 10, 4);
+  ctx.globalAlpha = 1;
+
   ctx.fillStyle = "#f6d2a8";
   ctx.beginPath();
-  ctx.arc(0, -34, 12, 0, Math.PI * 2);
+  ctx.arc(2, -4, 10, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#ff5d73";
+
+  ctx.fillStyle = "#16212c";
   ctx.beginPath();
-  ctx.ellipse(0, -46, 18 + Math.sin(now / 160) * 1.5, 7, 0, 0, Math.PI * 2);
+  ctx.ellipse(-6, 0, 10, 15, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = skin.trail;
+  ctx.beginPath();
+  ctx.ellipse(7, -4, 12 + pulse * 1.5, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#fbe764";
+  ctx.beginPath();
+  ctx.arc(50, 0, 4 + pulse * 1.2, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
