@@ -963,7 +963,6 @@ export default function CasterCycleApp() {
   const [stats, setStats] = useState<PersistedStats>({ bestToday: 0, bestAll: 0, streak: 0, lastRideDate: null });
   const [selectedSkin, setSelectedSkin] = useState("signal");
   const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
-  const [socialRows, setSocialRows] = useState<LeaderboardRow[]>([]);
   const [leaderboardScope, setLeaderboardScope] = useState<LeaderboardScope>("global");
   const [leaderboardPeriod, setLeaderboardPeriod] = useState<LeaderboardPeriod>("daily");
   const [leaderboardMode, setLeaderboardMode] = useState<LeaderboardMode>("dash");
@@ -1285,18 +1284,6 @@ export default function CasterCycleApp() {
     } catch {}
   }, [leaderboardMode, leaderboardPeriod, leaderboardScope, user?.fid]);
 
-  const loadSocialPreview = useCallback(async () => {
-    const current = gameRef.current;
-    try {
-      const scope = user?.fid ? "friends" : "global";
-      const url = `/api/scores?dateKey=${encodeURIComponent(current.dateKey)}&scope=${scope}&period=daily&mode=dash&fid=${user?.fid ?? 0}&compact=1&limit=5`;
-      const res = await fetch(url, { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
-      if (Array.isArray(data.rows)) setSocialRows(data.rows);
-    } catch {}
-  }, [user?.fid]);
-
   const submitScore = useCallback(async (finishedGame: GameModel) => {
     if (finishedGame.submitted) return;
     finishedGame.submitted = true;
@@ -1339,9 +1326,8 @@ export default function CasterCycleApp() {
       setToast("Leaderboard saved locally");
     } finally {
       loadLeaderboard(leaderboardScope, leaderboardPeriod);
-      loadSocialPreview();
     }
-  }, [address, leaderboardPeriod, leaderboardScope, loadLeaderboard, loadSocialPreview, selectedSkin, user]);
+  }, [address, leaderboardPeriod, leaderboardScope, loadLeaderboard, selectedSkin, user]);
 
   const submitFreestyleScore = useCallback(async (free: FreeRideModel) => {
     if (free.submitted || free.distance < 20) return;
@@ -1383,9 +1369,8 @@ export default function CasterCycleApp() {
       setToast("Freestyle saved locally");
     } finally {
       loadLeaderboard(leaderboardScope, leaderboardPeriod, leaderboardMode);
-      loadSocialPreview();
     }
-  }, [address, leaderboardMode, leaderboardPeriod, leaderboardScope, loadLeaderboard, loadSocialPreview, selectedSkin, user]);
+  }, [address, leaderboardMode, leaderboardPeriod, leaderboardScope, loadLeaderboard, selectedSkin, user]);
 
   const finishRide = useCallback((reason: "course" | "battery" = "course") => {
     const current = gameRef.current;
@@ -1763,8 +1748,7 @@ export default function CasterCycleApp() {
   useEffect(() => {
     loadStats(gameRef.current.dateKey);
     loadLeaderboard("global", "daily");
-    loadSocialPreview();
-  }, [loadLeaderboard, loadSocialPreview, loadStats]);
+  }, [loadLeaderboard, loadStats]);
 
   useEffect(() => {
     farcasterHapticsEnabled = hapticsEnabled;
@@ -2379,20 +2363,13 @@ export default function CasterCycleApp() {
                 {dashboardTab === "ride" && (
                   <>
                     <WorldHub
-                      selected={rideArea}
                       phase={hud.phase}
                       score={hud.score}
                       bestToday={Math.max(stats.bestToday, hud.score)}
                       bestAll={Math.max(stats.bestAll, hud.score)}
                       streak={stats.streak}
-                      socialRows={socialRows}
                       proActive={effectivePro}
-                      dayActive={dayActive}
-                      lifetimeActive={annualActive}
-                      destination={destinationSpot}
                       sharing={sharing}
-                      onSelect={chooseRideArea}
-                      onDestination={setDestinationSpot}
                       onStart={startRide}
                       onFreeRide={startFreeRide}
                       onShop={() => setDashboardTab("shop")}
@@ -2469,6 +2446,7 @@ export default function CasterCycleApp() {
                 {dashboardTab === "garage" && (
                   <>
                     <AreaPicker selected={rideArea} proActive={effectivePro} lifetimeActive={annualActive} onSelect={chooseRideArea} />
+                    <DestinationPicker selected={destinationSpot} onSelect={setDestinationSpot} />
                     <SkinPicker skins={SKINS} selected={selectedSkin} isUnlocked={skinUnlocked} onSelect={setSelectedSkin} />
                   </>
                 )}
@@ -2746,148 +2724,93 @@ function WelcomeBackPanel({
 }
 
 function WorldHub({
-  selected,
   phase,
   score,
   bestToday,
   bestAll,
   streak,
-  socialRows,
   proActive,
-  dayActive,
-  lifetimeActive,
-  destination,
   sharing,
-  onSelect,
-  onDestination,
   onStart,
   onFreeRide,
   onShop,
   onShare,
 }: {
-  selected: RideArea;
   phase: RidePhase;
   score: number;
   bestToday: number;
   bestAll: number;
   streak: number;
-  socialRows: LeaderboardRow[];
   proActive: boolean;
-  dayActive: boolean;
-  lifetimeActive: boolean;
-  destination: string | null;
   sharing: boolean;
-  onSelect: (area: RideArea) => void;
-  onDestination: (spot: string | null) => void;
   onStart: () => void;
   onFreeRide: () => void;
   onShop: () => void;
   onShare: () => void;
 }) {
-  const worldMeta: Record<RideArea, { kicker: string; badge: string; access: string; feature: string; lockText: string }> = {
-    park: {
-      kicker: "Open ride",
-      badge: "Open",
-      access: "Community",
-      feature: "Expanded park with courts, fields, streams, gardens, and pump lines.",
-      lockText: "Open",
-    },
-    statePark: {
-      kicker: "Open ride",
-      badge: "Open",
-      access: "Free",
-      feature: "Long forest loops, stream bridges, descents, and lookout routes.",
-      lockText: "Open",
-    },
-    bikeLand: {
-      kicker: "Premium",
-      badge: "$1 day",
-      access: lifetimeActive ? "Lifetime" : proActive ? "Unlocked" : "Cycle Pass",
-      feature: "Pump tracks, neon lanes, club drops, and future premium worlds.",
-      lockText: "Unlock",
-    },
-  };
-
-  const canRide = (area: RideArea) => area === "park" || area === "statePark" || (area === "bikeLand" && proActive);
-  const selectedRoute = routeForArea(selected);
-  const passLabel = lifetimeActive ? "Lifetime unlocked" : dayActive ? "Day pass active" : "30s free roam";
+  const event = dailyParkEvent();
+  const activeRun = phase === "riding" || phase === "finished";
+  const passLabel = proActive ? "Unlimited active" : "30s free roam";
 
   return (
     <div className="mt-4">
-      <div className="flex items-end justify-between gap-3">
+      <div className="rounded-md border border-white/10 bg-white/[0.05] p-3">
         <div className="min-w-0">
-          <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#7cf2ff]">Play</div>
-          <div className="mt-1 truncate text-xl font-black leading-tight text-white">{selectedRoute.name}</div>
-          <div className="mt-1 truncate text-xs font-semibold text-white/54">{selectedRoute.tagline}</div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#7cf2ff]">Today</div>
+              <div className="mt-1 truncate text-xl font-black leading-tight text-white">Pick a ride</div>
+            </div>
+            <div className="shrink-0 rounded-md border border-[#fbe764]/30 bg-[#fbe764]/12 px-2 py-1 text-right">
+              <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#fbe764]">score</div>
+              <div className="text-sm font-black text-white">{score.toLocaleString()}</div>
+            </div>
+          </div>
+          <div className="mt-2 truncate text-xs font-semibold text-white/58">{event.title} at {event.spot}</div>
         </div>
-        <div className="shrink-0 rounded-md border border-[#fbe764]/28 bg-[#fbe764]/12 px-2 py-1 text-right">
-          <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#fbe764]">score</div>
-          <div className="text-sm font-black text-white">{score.toLocaleString()}</div>
-        </div>
-      </div>
-
-      <div className="mt-3 grid grid-cols-3 gap-2">
-        <ResultStat label="today" value={bestToday.toLocaleString()} />
-        <ResultStat label="best" value={bestAll.toLocaleString()} />
-        <ResultStat label="streak" value={String(streak)} />
-      </div>
-      <StreakStrip streak={streak} />
-
-      <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2">
-        <div className="min-w-0">
-          <div className="text-[9px] font-black uppercase tracking-[0.16em] text-white/42">access</div>
-          <div className="truncate text-sm font-black text-white">{passLabel}</div>
-        </div>
-        <SocialRiderStack rows={socialRows} />
-        <button
-          className="inline-flex min-h-9 shrink-0 items-center justify-center gap-1 rounded-md border border-[#fbe764]/45 bg-[#fbe764]/14 px-3 text-[11px] font-black text-[#fbe764] active:scale-[0.98]"
-          onClick={proActive ? onFreeRide : onShop}
-        >
-          {proActive ? <Bike size={14} /> : <Crown size={14} />}
-          {proActive ? "Roam" : "Upgrade"}
-        </button>
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2">
-      <div className="rounded-md border border-[#7cf2ff]/22 bg-[#7cf2ff]/9 p-3">
-        <div className="flex h-full flex-col justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#7cf2ff]">
-              <Gauge size={13} />
-              Daily dash
-            </div>
-            <div className="mt-1 text-sm font-black text-white">Forward score run</div>
-            <div className="mt-1 text-xs font-semibold leading-4 text-white/55">Hazards, charge, leaderboard.</div>
-          </div>
-          <button
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-3 text-xs font-black text-[#111923] active:scale-[0.98]"
-            onClick={onStart}
-          >
-            <Play size={15} />
-            Dash
-          </button>
-        </div>
+        <button
+          className="min-h-[116px] rounded-md border border-[#a2ff9a]/35 bg-[#a2ff9a]/12 p-3 text-left shadow-[0_18px_40px_rgba(162,255,154,0.08)] active:scale-[0.98]"
+          onClick={onFreeRide}
+        >
+          <span className="flex h-9 w-9 items-center justify-center rounded-md bg-[#a2ff9a] text-[#071018]">
+            <Bike size={18} />
+          </span>
+          <span className="mt-3 block text-base font-black leading-tight text-white">Roam</span>
+          <span className="mt-1 block text-xs font-semibold leading-4 text-white/58">Open park. Any direction.</span>
+        </button>
+        <button
+          className="min-h-[116px] rounded-md border border-[#7cf2ff]/35 bg-[#7cf2ff]/12 p-3 text-left shadow-[0_18px_40px_rgba(124,242,255,0.08)] active:scale-[0.98]"
+          onClick={onStart}
+        >
+          <span className="flex h-9 w-9 items-center justify-center rounded-md bg-[#7cf2ff] text-[#071018]">
+            <Play size={18} />
+          </span>
+          <span className="mt-3 block text-base font-black leading-tight text-white">Dash</span>
+          <span className="mt-1 block text-xs font-semibold leading-4 text-white/55">Daily score run.</span>
+        </button>
       </div>
 
-      <div className="rounded-md border border-[#a2ff9a]/24 bg-[#a2ff9a]/10 p-3">
-        <div className="flex h-full flex-col justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#a2ff9a]">
-              <Map size={13} />
-              Freestyle park
-            </div>
-            <div className="mt-1 text-sm font-black text-white">Open world ride</div>
-              <div className="mt-1 text-xs font-semibold leading-4 text-white/55">Big map, terrain, zones.</div>
-          </div>
-          <button
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[#a2ff9a] px-3 text-xs font-black text-[#111923] active:scale-[0.98]"
-            onClick={onFreeRide}
-          >
-            <Bike size={15} />
-            Roam
-          </button>
-        </div>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        <ResultStat label="best" value={bestAll.toLocaleString()} />
+        <ResultStat label="today" value={bestToday.toLocaleString()} />
+        <ResultStat label="streak" value={`${Math.min(7, Math.max(0, streak))}/7`} />
       </div>
+
+      <div className="mt-2 flex min-h-11 items-center justify-between gap-3 rounded-md border border-white/10 bg-black/20 px-3">
+        <div className="min-w-0">
+          <div className="text-[9px] font-black uppercase tracking-[0.14em] text-white/42">access</div>
+          <div className="truncate text-sm font-black text-white">{passLabel}</div>
+        </div>
+        <button
+          className="inline-flex min-h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-white/12 bg-white/8 px-3 text-[10px] font-black uppercase tracking-[0.08em] text-white"
+          onClick={onShop}
+        >
+          <Crown size={13} />
+          Pass
+        </button>
       </div>
 
       {!proActive && (
@@ -2903,38 +2826,6 @@ function WorldHub({
         </button>
       )}
 
-      <div className="mt-3 rounded-md border border-white/10 bg-[#02070c]/42 p-2">
-        <div className="mb-2 flex items-center justify-between gap-2 px-1">
-          <div className="text-[10px] font-black uppercase tracking-[0.16em] text-white/42">route</div>
-          <div className="text-[10px] font-bold text-white/38">choose before Dash</div>
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-        {ROUTES.map((route) => {
-          const meta = worldMeta[route.area];
-          const active = selected === route.area;
-          const unlocked = canRide(route.area);
-          return (
-            <button
-              key={route.area}
-              className={`min-h-[74px] rounded-md border p-2 text-left transition active:scale-[0.99] ${
-                active ? "border-[#fbe764]/72 bg-[#fbe764]/12" : "border-white/12 bg-white/7"
-              }`}
-              onClick={() => onSelect(route.area)}
-            >
-              <span className="flex items-center justify-between gap-1">
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: route.accent }} />
-                {unlocked ? <CheckCircle2 size={12} className={active ? "text-[#fbe764]" : "text-[#a2ff9a]"} /> : <Lock size={12} className="text-white/46" />}
-              </span>
-              <span className="mt-2 block text-xs font-black leading-tight text-white">{route.name.replace("Community ", "")}</span>
-              <span className="mt-1 block truncate text-[9px] font-black uppercase tracking-[0.08em] text-white/42">{unlocked ? (active ? "Selected" : meta.access) : meta.badge}</span>
-            </button>
-          );
-        })}
-        </div>
-      </div>
-
-      <DestinationPicker selected={destination} onSelect={onDestination} />
-
       <div className="mt-3">
         <button
           className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/14 px-4 text-sm font-black text-white transition active:scale-[0.98] disabled:opacity-70"
@@ -2942,7 +2833,7 @@ function WorldHub({
           onClick={onShare}
         >
           <Share2 size={18} />
-          {sharing ? "Opening" : phase === "finished" ? "Share" : "Invite"}
+          {sharing ? "Opening" : activeRun ? "Share ride" : "Invite friends"}
         </button>
       </div>
     </div>
@@ -2963,7 +2854,7 @@ function AreaPicker({
   const areas = [
     {
       id: "park" as RideArea,
-      label: "Community Park",
+      label: "Community",
       meta: "Free ride",
       icon: <Bike size={15} />,
       locked: false,
@@ -3002,26 +2893,6 @@ function AreaPicker({
           <span className="block truncate text-[10px] font-bold uppercase tracking-[0.08em] text-white/45">{area.meta}</span>
         </button>
       ))}
-    </div>
-  );
-}
-
-function StreakStrip({ streak }: { streak: number }) {
-  const active = Math.min(7, Math.max(0, streak));
-  return (
-    <div className="mt-2 rounded-md border border-white/10 bg-white/[0.04] px-3 py-2">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="text-[9px] font-black uppercase tracking-[0.14em] text-white/42">7 day loop</div>
-        <div className="text-[10px] font-black text-[#fbe764]">{active}/7</div>
-      </div>
-      <div className="grid grid-cols-7 gap-1">
-        {Array.from({ length: 7 }).map((_, index) => (
-          <div
-            key={index}
-            className={`h-2 rounded-full ${index < active ? "bg-[#fbe764] shadow-[0_0_10px_rgba(251,231,100,0.5)]" : "bg-white/12"}`}
-          />
-        ))}
-      </div>
     </div>
   );
 }
@@ -3381,31 +3252,6 @@ function ResultStat({ label, value }: { label: string; value: string }) {
     <div className="rounded-md bg-white/9 px-2 py-2">
       <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-white/50">{label}</div>
       <div className="truncate text-base font-black leading-tight text-white">{value}</div>
-    </div>
-  );
-}
-
-function SocialRiderStack({ rows }: { rows: LeaderboardRow[] }) {
-  const visible = rows.slice(0, 3);
-  if (visible.length === 0) {
-    return (
-      <div className="flex h-9 w-9 items-center justify-center rounded-md border border-white/12 bg-black/24 text-[#7cf2ff]">
-        <Users size={16} />
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex -space-x-2">
-      {visible.map((row, index) => (
-        <div
-          key={`${row.fid}-${index}`}
-          className="flex h-9 w-9 items-center justify-center rounded-md border-2 border-[#071018] bg-[#101923] bg-cover bg-center text-[10px] font-black text-[#7cf2ff] shadow-lg"
-          style={{ backgroundImage: row.pfpUrl ? `url("${row.pfpUrl}")` : undefined, zIndex: visible.length - index }}
-        >
-          {!row.pfpUrl && (row.username || row.displayName || "R").slice(0, 1).toUpperCase()}
-        </div>
-      ))}
     </div>
   );
 }
