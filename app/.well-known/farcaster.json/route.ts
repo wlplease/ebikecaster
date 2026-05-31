@@ -16,7 +16,7 @@ export function GET() {
       splashBackgroundColor: "#101b26",
       subtitle: "Freestyle park rides",
       description:
-        "Freestyle Community Park, unlock State Park and E-Bike Land, customize bikes, join the paid club, and share scores.",
+        "Freestyle Community and State Park rides, unlock E-Bike Land, customize bikes, join the paid club, and share scores.",
       screenshotUrls: [
         appUrl("/media/castercycle-screenshot-ready.png"),
         appUrl("/media/castercycle-screenshot-ride.png"),
@@ -28,7 +28,7 @@ export function GET() {
       tagline: "Park e-bike dash.",
       ogTitle: "CasterCycle",
       ogDescription:
-        "Ride park paths, unlock paid bike worlds, customize bikes, and challenge Farcaster friends.",
+        "Ride open parks, unlock E-Bike Land, customize bikes, and challenge Farcaster friends.",
       ogImageUrl: appUrl("/media/castercycle-hero.png"),
       castShareUrl: FARCASTER_SHARE_URL,
     },

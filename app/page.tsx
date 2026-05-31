@@ -225,7 +225,7 @@ const ROUTES: RouteTheme[] = [
   },
   {
     name: "State Park",
-    tagline: "premium forest paths and streams",
+    tagline: "open forest paths and streams",
     area: "statePark",
     skyTop: "#2d6f8f",
     skyBottom: "#d7e78a",
@@ -238,7 +238,7 @@ const ROUTES: RouteTheme[] = [
   },
   {
     name: "E-Bike Land",
-    tagline: "premium pump tracks and glow paths",
+    tagline: "paid pump tracks and glow paths",
     area: "bikeLand",
     skyTop: "#372064",
     skyBottom: "#35c6b7",
@@ -257,7 +257,7 @@ const SKINS: Skin[] = [
   { id: "sunset", name: "Sunset Dash", frame: "#ff6d4a", battery: "#ffe45e", trail: "#ffb703", unlock: "score", label: "5k score" },
   { id: "spark", name: "Base Spark", frame: "#0052ff", battery: "#fbe764", trail: "#7cf2ff", unlock: "supporter", label: "ETH support" },
   { id: "carbon", name: "Carbon Pro", frame: "#f7fbff", battery: "#c4b5fd", trail: "#c4b5fd", unlock: "pro", label: "Cycle Pass" },
-  { id: "forest", name: "Forest Cruiser", frame: "#9ff28a", battery: "#fbe764", trail: "#9ff28a", unlock: "pro", label: "State Park" },
+  { id: "forest", name: "Forest Cruiser", frame: "#9ff28a", battery: "#fbe764", trail: "#9ff28a", unlock: "base", label: "State Park" },
   { id: "neon", name: "Glow Track", frame: "#ff7adf", battery: "#7cf2ff", trail: "#ff7adf", unlock: "pro", label: "E-Bike Land" },
 ];
 
@@ -558,7 +558,7 @@ export default function CasterCycleApp() {
       setAudioEnabled(localStorage.getItem(`${STORAGE_PREFIX}:audio`) === "1");
       setVoiceEnabled(localStorage.getItem(`${STORAGE_PREFIX}:voice`) === "1");
       const savedArea = localStorage.getItem(`${STORAGE_PREFIX}:rideArea`);
-      if (savedArea === "park" || ((savedArea === "statePark" || savedArea === "bikeLand") && savedPassActive)) {
+      if (savedArea === "park" || savedArea === "statePark" || (savedArea === "bikeLand" && savedPassActive)) {
         setRideArea(savedArea);
         gameRef.current = makeGame(savedArea);
       }
@@ -1023,27 +1023,21 @@ export default function CasterCycleApp() {
     try {
       localStorage.setItem(`${STORAGE_PREFIX}:${key}`, String(until));
       localStorage.setItem(`${STORAGE_PREFIX}:skin`, "carbon");
-      localStorage.setItem(`${STORAGE_PREFIX}:rideArea`, plan === "weekly" ? "statePark" : "bikeLand");
+      localStorage.setItem(`${STORAGE_PREFIX}:rideArea`, "bikeLand");
     } catch {}
     setSelectedSkin("carbon");
-    const unlockedArea = plan === "weekly" ? "statePark" : "bikeLand";
+    const unlockedArea = "bikeLand";
     setRideArea(unlockedArea);
     gameRef.current = makeGame(unlockedArea);
     syncHud();
-    setToast(plan === "weekly" ? "State Park weekly active" : "State Park lifetime active");
+    setToast(plan === "weekly" ? "E-Bike Land weekly active" : "E-Bike Land lifetime active");
     haptic("success");
   }, [syncHud]);
 
   const chooseRideArea = useCallback((area: RideArea) => {
-    if (area === "statePark" && !effectivePro) {
+    if (area === "bikeLand" && !effectivePro) {
       setDashboardTab("shop");
-      setToast("Unlock State Park");
-      haptic("warning");
-      return;
-    }
-    if (area === "bikeLand" && !annualActive) {
-      setDashboardTab("shop");
-      setToast("Unlock Lifetime Pass");
+      setToast("Unlock E-Bike Land");
       haptic("warning");
       return;
     }
@@ -1056,7 +1050,7 @@ export default function CasterCycleApp() {
       syncHud();
     }
     haptic("selection");
-  }, [annualActive, effectivePro, syncHud]);
+  }, [effectivePro, syncHud]);
 
   useEffect(() => {
     loadStats(gameRef.current.dateKey);
@@ -1862,29 +1856,29 @@ function WorldHub({
 }) {
   const worldMeta: Record<RideArea, { kicker: string; badge: string; access: string; feature: string; lockText: string }> = {
     park: {
-      kicker: "Free roam",
+      kicker: "Open ride",
       badge: "Open",
       access: "Community",
       feature: "Skatepark, courts, fields, streams, and open paths.",
       lockText: "Open",
     },
     statePark: {
-      kicker: "Adventure",
-      badge: "$0.99 week",
-      access: proActive ? "Unlocked" : "Cycle Pass",
+      kicker: "Open ride",
+      badge: "Open",
+      access: "Free",
       feature: "Forest loops, stream bridges, hill descents, and longer lines.",
-      lockText: "Unlock",
+      lockText: "Open",
     },
     bikeLand: {
       kicker: "Premium",
-      badge: "$7 lifetime",
-      access: lifetimeActive ? "Lifetime" : "Lifetime Pass",
+      badge: "$0.99 week",
+      access: lifetimeActive ? "Lifetime" : proActive ? "Unlocked" : "Cycle Pass",
       feature: "Pump tracks, neon lanes, club drops, and future premium worlds.",
       lockText: "Unlock",
     },
   };
 
-  const canRide = (area: RideArea) => area === "park" || (area === "statePark" && proActive) || (area === "bikeLand" && lifetimeActive);
+  const canRide = (area: RideArea) => area === "park" || area === "statePark" || (area === "bikeLand" && proActive);
   const selectedRoute = routeForArea(selected);
 
   return (
@@ -1907,7 +1901,28 @@ function WorldHub({
         <ResultStat label="streak" value={String(streak)} />
       </div>
 
-      <div className="mt-3 grid gap-2">
+      <div className="mt-3 rounded-md border border-[#7cf2ff]/22 bg-[#7cf2ff]/9 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#7cf2ff]">
+              <Gauge size={13} />
+              Daily dash
+            </div>
+            <div className="mt-1 text-sm font-black text-white">Forward score run</div>
+            <div className="mt-1 text-xs font-semibold leading-4 text-white/55">Straight racer, fast hazards, leaderboard score.</div>
+          </div>
+          <button
+            className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-3 text-xs font-black text-[#111923] active:scale-[0.98]"
+            onClick={onStart}
+          >
+            <Play size={15} />
+            Dash
+          </button>
+        </div>
+      </div>
+
+      <div className="relative mt-3 grid gap-2 rounded-md border border-white/10 bg-black/16 p-2">
+        <div className="pointer-events-none absolute bottom-8 left-[62px] top-8 w-1 rounded-full bg-white/12" />
         {ROUTES.map((route) => {
           const meta = worldMeta[route.area];
           const active = selected === route.area;
@@ -1915,11 +1930,15 @@ function WorldHub({
           return (
             <button
               key={route.area}
-              className={`grid min-h-[112px] grid-cols-[112px_1fr] gap-3 rounded-md border p-2 text-left transition active:scale-[0.99] ${
+              className={`relative grid min-h-[112px] grid-cols-[112px_1fr] gap-3 rounded-md border p-2 text-left transition active:scale-[0.99] ${
                 active ? "border-[#fbe764]/72 bg-[#fbe764]/12" : "border-white/12 bg-white/7"
               }`}
               onClick={() => onSelect(route.area)}
             >
+              <span
+                className="absolute left-[55px] top-1/2 z-10 h-4 w-4 -translate-y-1/2 rounded-full border-2"
+                style={{ background: active ? "#fbe764" : route.accent, borderColor: "#111923" }}
+              />
               <WorldPreview route={route} active={active} locked={!unlocked} />
               <span className="flex min-w-0 flex-col justify-between py-1">
                 <span className="min-w-0">
@@ -1951,7 +1970,7 @@ function WorldHub({
           onClick={onStart}
         >
           {phase === "finished" ? <RotateCcw size={18} /> : <Play size={18} />}
-          {phase === "finished" ? "Ride Again" : "Start World"}
+          {phase === "finished" ? "Ride Again" : "Free Ride"}
         </button>
         <button
           className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-4 text-sm font-black text-[#111923] transition active:scale-[0.98] disabled:opacity-70"
@@ -2036,16 +2055,16 @@ function AreaPicker({
     {
       id: "statePark" as RideArea,
       label: "State Park",
-      meta: proActive ? "Unlocked" : "$0.99 week",
-      icon: proActive ? <Sparkles size={15} /> : <Lock size={15} />,
-      locked: !proActive,
+      meta: "Open ride",
+      icon: <Sparkles size={15} />,
+      locked: false,
     },
     {
       id: "bikeLand" as RideArea,
       label: "E-Bike Land",
-      meta: lifetimeActive ? "Lifetime" : "$7 lifetime",
-      icon: lifetimeActive ? <Zap size={15} /> : <Lock size={15} />,
-      locked: !lifetimeActive,
+      meta: lifetimeActive ? "Lifetime" : proActive ? "Unlocked" : "$0.99 / $7",
+      icon: proActive ? <Zap size={15} /> : <Lock size={15} />,
+      locked: !proActive,
     },
   ];
 
@@ -2667,7 +2686,7 @@ function UpgradePanel({
             Cycle Pass
           </div>
           <div className="mt-1 text-xs font-semibold text-white/64">
-            Open State Park for a week, or go lifetime for E-Bike Land, Carbon Pro, the club lounge, and future premium rides.
+            Community Park and State Park are open. Cycle Pass unlocks E-Bike Land, Carbon Pro, the club lounge, and future premium rides.
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -2688,7 +2707,7 @@ function UpgradePanel({
           onClick={() => setPlan("weekly")}
         >
           <span className="block">Weekly $0.99</span>
-          <span className="mt-1 block text-[10px] font-bold text-white/52">State Park</span>
+          <span className="mt-1 block text-[10px] font-bold text-white/52">E-Bike Land</span>
         </button>
         <button
           className="rounded-md border px-2 py-2 text-xs font-black text-white"
