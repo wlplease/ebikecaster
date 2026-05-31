@@ -34,11 +34,11 @@ import { useFarcasterUser } from "@/components/farcaster-gate";
 import { CASTER_CREDITS_ABI, CASTER_CREDITS_CONTRACT, type RewardClaimPayload } from "@/lib/reward-credits";
 import {
   BASE_CHAIN_ID,
+  DAY_PRICE,
   ETH_SUPPORT_AMOUNT,
   TREASURY_ADDRESS,
   USDC_ABI,
   USDC_CONTRACT,
-  WEEKLY_PRICE,
   YEARLY_PRICE,
   formatPassExpiry,
 } from "@/lib/pro-pass";
@@ -49,8 +49,9 @@ const ETH_ADDRESS_REGEX_CLIENT = /^0x[0-9a-f]{40}$/i;
 const COURSE_LENGTH = 11800;
 const VIEW_DISTANCE = 1280;
 const STORAGE_PREFIX = "castercycle";
-const WEEK_SECONDS = 7 * 24 * 60 * 60;
+const DAY_SECONDS = 24 * 60 * 60;
 const LIFETIME_SECONDS = 80 * 365 * 24 * 60 * 60;
+const FREE_ROAM_SECONDS = 30;
 
 type RidePhase = "ready" | "riding" | "finished";
 type Lane = -1 | 0 | 1;
@@ -76,6 +77,7 @@ type VoiceLineId =
   | "hit"
   | "finalStretch";
 type HapticKind = "selection" | "light" | "medium" | "heavy" | "success" | "warning" | "error";
+type PassPlan = "day" | "lifetime";
 
 type RouteTheme = {
   name: string;
@@ -209,6 +211,35 @@ type LoungeMessage = {
   createdAt: number;
 };
 
+type FreeRideModel = {
+  x: number;
+  y: number;
+  heading: number;
+  speed: number;
+  distance: number;
+  remaining: number;
+  parkScore: number;
+  combo: number;
+  pickupCooldown: number;
+  message: string;
+  messageT: number;
+  zone: string;
+  warned: boolean;
+  visitedZones: string[];
+};
+
+type FreeRideHud = {
+  active: boolean;
+  speed: number;
+  distance: number;
+  remaining: number;
+  score: number;
+  combo: number;
+  message: string;
+  unlimited: boolean;
+  zone: string;
+};
+
 const ROUTES: RouteTheme[] = [
   {
     name: "Community Park",
@@ -268,6 +299,17 @@ const DAILY_MISSIONS: DailyMission[] = [
   { kind: "battery", title: "Range Saver", goal: "Finish above 62% battery", target: 62, reward: 725 },
   { kind: "bolts", title: "Charge Hunt", goal: "Collect 16 bolts", target: 16, reward: 625 },
 ];
+
+const FREE_RIDE_SPOTS = [
+  { name: "Skate Bowl", short: "Skate", x: -720, y: -520, color: "#c9d4d7" },
+  { name: "Courts", short: "Courts", x: 620, y: -500, color: "#d46a43" },
+  { name: "Tennis Row", short: "Tennis", x: 285, y: -540, color: "#3da06f" },
+  { name: "Soccer Fields", short: "Soccer", x: 760, y: 360, color: "#4a9b44" },
+  { name: "Stream Trail", short: "Stream", x: -520, y: 420, color: "#5fcbea" },
+  { name: "Pine Loop", short: "Pines", x: 80, y: -980, color: "#2e714d" },
+  { name: "E-Bike Land", short: "Glow", x: 1010, y: -890, color: "#ff7adf" },
+  { name: "Trailhead", short: "Start", x: 0, y: 0, color: "#fbe764" },
+] as const;
 
 function localDateKey(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -476,6 +518,19 @@ function missionStatus(game: GameModel) {
   };
 }
 
+function freeRideZone(x: number, y: number) {
+  let best: (typeof FREE_RIDE_SPOTS)[number] = FREE_RIDE_SPOTS[0];
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (const spot of FREE_RIDE_SPOTS) {
+    const distance = Math.hypot(x - spot.x, y - spot.y);
+    if (distance < bestDistance) {
+      best = spot;
+      bestDistance = distance;
+    }
+  }
+  return best.name;
+}
+
 function skinShortName(name: string) {
   return name
     .replace(" Yellow", "")
@@ -511,7 +566,35 @@ export default function CasterCycleApp() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const motorAudioRef = useRef<MotorAudio | null>(null);
   const voiceRef = useRef<HTMLAudioElement | null>(null);
+  const freeRideRef = useRef<FreeRideModel>({
+    x: 0,
+    y: 0,
+    heading: -Math.PI / 2,
+    speed: 0,
+    distance: 0,
+    remaining: FREE_ROAM_SECONDS,
+    parkScore: 0,
+    combo: 0,
+    pickupCooldown: 0,
+    message: "",
+    messageT: 0,
+    zone: "Trailhead",
+    warned: false,
+    visitedZones: ["Trailhead"],
+  });
   const [hud, setHud] = useState<Hud>(() => emptyHud(gameRef.current));
+  const [freeRideActive, setFreeRideActive] = useState(false);
+  const [freeRideHud, setFreeRideHud] = useState<FreeRideHud>({
+    active: false,
+    speed: 0,
+    distance: 0,
+    remaining: FREE_ROAM_SECONDS,
+    score: 0,
+    combo: 0,
+    message: "",
+    unlimited: false,
+    zone: "Trailhead",
+  });
   const [stats, setStats] = useState<PersistedStats>({ bestToday: 0, bestAll: 0, streak: 0, lastRideDate: null });
   const [selectedSkin, setSelectedSkin] = useState("signal");
   const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
@@ -520,7 +603,7 @@ export default function CasterCycleApp() {
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>("ride");
   const [rideArea, setRideArea] = useState<RideArea>("park");
   const [ethSupporter, setEthSupporter] = useState(false);
-  const [weeklyUntil, setWeeklyUntil] = useState(0);
+  const [dayUntil, setDayUntil] = useState(0);
   const [annualUntil, setAnnualUntil] = useState(0);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
@@ -535,10 +618,10 @@ export default function CasterCycleApp() {
   const displayName = user?.username ? `@${user.username}` : isStandalone ? "browser rider" : "farcaster rider";
   const progress = clamp(hud.distance / COURSE_LENGTH, 0, 1);
   const mission = missionStatus(game);
-  const weeklyActive = weeklyUntil > Math.floor(Date.now() / 1000);
+  const dayActive = dayUntil > Math.floor(Date.now() / 1000);
   const annualActive = annualUntil > Math.floor(Date.now() / 1000);
-  const effectivePro = weeklyActive || annualActive;
-  const passUntil = Math.max(weeklyUntil, annualUntil);
+  const effectivePro = dayActive || annualActive;
+  const passUntil = Math.max(dayUntil, annualUntil);
 
   const skinUnlocked = useCallback((item: Skin) => {
     if (item.unlock === "base") return true;
@@ -560,10 +643,13 @@ export default function CasterCycleApp() {
       const savedSkin = localStorage.getItem(`${STORAGE_PREFIX}:skin`);
       if (savedSkin && SKINS.some((item) => item.id === savedSkin)) setSelectedSkin(savedSkin);
       setEthSupporter(localStorage.getItem(`${STORAGE_PREFIX}:ethSupporter`) === "1");
-      const savedWeeklyUntil = Number(localStorage.getItem(`${STORAGE_PREFIX}:weeklyUntil`) || "0");
+      const savedDayUntil = Math.max(
+        Number(localStorage.getItem(`${STORAGE_PREFIX}:dayUntil`) || "0"),
+        Number(localStorage.getItem(`${STORAGE_PREFIX}:weeklyUntil`) || "0"),
+      );
       const savedAnnualUntil = Number(localStorage.getItem(`${STORAGE_PREFIX}:annualUntil`) || "0");
-      const savedPassActive = Math.max(savedWeeklyUntil, savedAnnualUntil) > Math.floor(Date.now() / 1000);
-      setWeeklyUntil(savedWeeklyUntil);
+      const savedPassActive = Math.max(savedDayUntil, savedAnnualUntil) > Math.floor(Date.now() / 1000);
+      setDayUntil(savedDayUntil);
       setAnnualUntil(savedAnnualUntil);
       setAudioEnabled(localStorage.getItem(`${STORAGE_PREFIX}:audio`) === "1");
       setVoiceEnabled(localStorage.getItem(`${STORAGE_PREFIX}:voice`) === "1");
@@ -602,6 +688,20 @@ export default function CasterCycleApp() {
   }, []);
 
   const syncHud = useCallback(() => setHud(emptyHud(gameRef.current)), []);
+  const syncFreeRideHud = useCallback(() => {
+    const free = freeRideRef.current;
+    setFreeRideHud({
+      active: freeRideActive,
+      speed: free.speed,
+      distance: free.distance,
+      remaining: free.remaining,
+      score: free.parkScore,
+      combo: free.combo,
+      message: free.messageT > 0 ? free.message : "",
+      unlimited: effectivePro,
+      zone: free.zone,
+    });
+  }, [effectivePro, freeRideActive]);
 
   const primeAudio = useCallback(async () => {
     if (typeof window === "undefined") return null;
@@ -903,7 +1003,53 @@ export default function CasterCycleApp() {
     }
   }, [setMiniAppAdded]);
 
+  const stopFreeRide = useCallback((showShop = false) => {
+    setFreeRideActive(false);
+    stopMotor();
+    if (showShop) {
+      setDashboardTab("shop");
+      setToast("30 seconds free. Unlock unlimited park play.");
+      haptic("warning");
+    }
+  }, [stopMotor]);
+
+  const startFreeRide = useCallback(() => {
+    const free = freeRideRef.current;
+    free.x = 0;
+    free.y = 0;
+    free.heading = -Math.PI / 2;
+    free.speed = 210;
+    free.distance = 0;
+    free.remaining = effectivePro ? FREE_ROAM_SECONDS : FREE_ROAM_SECONDS;
+    free.parkScore = 0;
+    free.combo = 0;
+    free.pickupCooldown = 0;
+    free.message = "";
+    free.messageT = 0;
+    free.zone = "Trailhead";
+    free.warned = false;
+    free.visitedZones = ["Trailhead"];
+    gameRef.current.phase = "ready";
+    setFreeRideActive(true);
+    setShowIntro(false);
+    setShowWelcomeBack(false);
+    setDashboardTab("ride");
+    setToast(effectivePro ? "Unlimited freestyle" : "30 seconds free");
+    haptic("success");
+    playSfx("start");
+    if (voiceEnabled) playVoice("ready", { route: "Freestyle Park" });
+  }, [effectivePro, playSfx, playVoice, voiceEnabled]);
+
   const changeLane = useCallback((direction: -1 | 1) => {
+    if (freeRideActive) {
+      const free = freeRideRef.current;
+      free.heading += direction * 0.28;
+      free.speed = clamp(free.speed + 18, 0, 360);
+      syncFreeRideHud();
+      haptic("light");
+      playSfx("lane");
+      return;
+    }
     const current = gameRef.current;
     if (current.phase === "ready") {
       startRide();
@@ -914,9 +1060,17 @@ export default function CasterCycleApp() {
     syncHud();
     haptic("light");
     playSfx("lane");
-  }, [playSfx, startRide, syncHud]);
+  }, [freeRideActive, playSfx, startRide, syncFreeRideHud, syncHud]);
 
   const boostOrHop = useCallback(() => {
+    if (freeRideActive) {
+      const free = freeRideRef.current;
+      free.speed = clamp(free.speed + 70, 0, 420);
+      syncFreeRideHud();
+      haptic("medium");
+      playSfx("boost");
+      return;
+    }
     const current = gameRef.current;
     if (current.phase === "ready") {
       startRide();
@@ -931,7 +1085,7 @@ export default function CasterCycleApp() {
       haptic("medium");
       playSfx("boost");
     }
-  }, [playSfx, startRide, syncHud]);
+  }, [freeRideActive, playSfx, startRide, syncFreeRideHud, syncHud]);
 
   const handleCoursePointerDown = useCallback((event: PointerEvent<HTMLCanvasElement>) => {
     coursePointerRef.current = { x: event.clientX, y: event.clientY };
@@ -942,8 +1096,21 @@ export default function CasterCycleApp() {
     coursePointerRef.current = null;
     const rect = event.currentTarget.getBoundingClientRect();
     const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
     const dx = start ? event.clientX - start.x : 0;
     const dy = start ? event.clientY - start.y : 0;
+
+    if (freeRideActive) {
+      const free = freeRideRef.current;
+      const centerX = rect.width / 2;
+      const centerY = rect.height * 0.58;
+      const targetAngle = Math.atan2(y - centerY, x - centerX);
+      free.heading = targetAngle;
+      free.speed = clamp(free.speed + (Math.abs(dx) + Math.abs(dy) > 18 ? 52 : 28), 80, 390);
+      syncFreeRideHud();
+      haptic("selection");
+      return;
+    }
 
     if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy) * 1.15) {
       changeLane(dx > 0 ? 1 : -1);
@@ -953,7 +1120,7 @@ export default function CasterCycleApp() {
     if (x < rect.width * 0.34) changeLane(-1);
     else if (x > rect.width * 0.66) changeLane(1);
     else boostOrHop();
-  }, [boostOrHop, changeLane]);
+  }, [boostOrHop, changeLane, freeRideActive, syncFreeRideHud]);
 
   const shareCast = useCallback(async (text: string, embeds: [] | [string] | [string, string], copiedText = "Share copied") => {
     const finalText = text.trimEnd().endsWith(SHARE_URL) ? text.trimEnd() : `${text.trimEnd()}\n${SHARE_URL}`;
@@ -1024,11 +1191,11 @@ export default function CasterCycleApp() {
     setSelectedSkin("spark");
   }, []);
 
-  const unlockPass = useCallback((plan: "weekly" | "lifetime") => {
-    const key = plan === "weekly" ? "weeklyUntil" : "annualUntil";
-    const seconds = plan === "weekly" ? WEEK_SECONDS : LIFETIME_SECONDS;
+  const unlockPass = useCallback((plan: PassPlan) => {
+    const key = plan === "day" ? "dayUntil" : "annualUntil";
+    const seconds = plan === "day" ? DAY_SECONDS : LIFETIME_SECONDS;
     const until = Math.floor(Date.now() / 1000) + seconds;
-    if (plan === "weekly") setWeeklyUntil(until);
+    if (plan === "day") setDayUntil(until);
     else setAnnualUntil(until);
     try {
       localStorage.setItem(`${STORAGE_PREFIX}:${key}`, String(until));
@@ -1040,7 +1207,7 @@ export default function CasterCycleApp() {
     setRideArea(unlockedArea);
     gameRef.current = makeGame(unlockedArea);
     syncHud();
-    setToast(plan === "weekly" ? "E-Bike Land weekly active" : "E-Bike Land lifetime active");
+    setToast(plan === "day" ? "Unlimited day pass active" : "Lifetime unlimited active");
     haptic("success");
   }, [syncHud]);
 
@@ -1155,7 +1322,62 @@ export default function CasterCycleApp() {
       if (current.feedbackT > 0) current.feedbackT = Math.max(0, current.feedbackT - dt);
       if (current.shake > 0) current.shake = Math.max(0, current.shake - dt * 3.4);
 
-      if (current.phase === "riding") {
+      if (freeRideActive) {
+        const free = freeRideRef.current;
+        const wasRemaining = free.remaining;
+        if (free.messageT > 0) free.messageT = Math.max(0, free.messageT - dt);
+        if (free.pickupCooldown > 0) free.pickupCooldown = Math.max(0, free.pickupCooldown - dt);
+        free.speed = clamp(free.speed - dt * 24, 0, effectivePro ? 430 : 360);
+        const move = free.speed * dt;
+        free.x = clamp(free.x + Math.cos(free.heading) * move, -1180, 1180);
+        free.y = clamp(free.y + Math.sin(free.heading) * move, -1180, 1180);
+        free.distance += move;
+        free.parkScore += move * (effectivePro ? 0.12 : 0.08);
+        const nextZone = freeRideZone(free.x, free.y);
+        if (nextZone !== free.zone) {
+          free.zone = nextZone;
+          if (!free.visitedZones.includes(nextZone)) {
+            free.visitedZones.push(nextZone);
+            free.combo += 1;
+            free.parkScore += 260 + free.visitedZones.length * 45;
+            free.speed = clamp(free.speed + 34, 0, effectivePro ? 430 : 360);
+            free.message = `New zone: ${nextZone}`;
+            free.messageT = 1.6;
+            haptic("light");
+            playSfx("combo");
+          }
+        }
+        const boostSpot = FREE_RIDE_SPOTS.find((spot) => spot.name !== "Trailhead" && Math.hypot(free.x - spot.x, free.y - spot.y) < 116);
+        if (boostSpot && free.pickupCooldown <= 0) {
+          free.pickupCooldown = 1.15;
+          free.combo += 1;
+          free.parkScore += 190 + free.combo * 28;
+          free.speed = clamp(free.speed + 82, 0, effectivePro ? 430 : 360);
+          free.message = `${boostSpot.short} boost +${190 + free.combo * 28}`;
+          free.messageT = 1.25;
+          haptic("medium");
+          playSfx("boost");
+        }
+        if (!effectivePro) free.remaining = Math.max(0, free.remaining - dt);
+        if (!effectivePro && !free.warned && free.remaining <= 5 && free.remaining > 0) {
+          free.warned = true;
+          setToast("5 seconds left");
+          haptic("warning");
+          playSfx("warning");
+        }
+        updateMotor({
+          ...current,
+          phase: "riding",
+          speed: free.speed,
+          boost: clamp(free.speed / 430, 0, 1),
+          combo: free.combo,
+        });
+        if (!effectivePro && wasRemaining > 0 && free.remaining <= 0) {
+          stopFreeRide(true);
+          playSfx("finish");
+        }
+        drawFreeRideScene(ctx, width, height, free, skin, effectivePro, now);
+      } else if (current.phase === "riding") {
         const targetOffset = current.targetLane;
         current.laneOffset += (targetOffset - current.laneOffset) * Math.min(1, dt * 10);
         if (Math.abs(current.targetLane - current.laneOffset) < 0.03) {
@@ -1332,13 +1554,16 @@ export default function CasterCycleApp() {
 
         if (current.distance >= COURSE_LENGTH) finishRide("course");
         if (current.battery <= 0) finishRide("battery");
+        drawScene(ctx, width, height, current, skin, now);
+      } else {
+        updateMotor(current);
+        drawScene(ctx, width, height, current, skin, now);
       }
 
-      if (current.phase !== "riding") updateMotor(current);
-      drawScene(ctx, width, height, current, skin, now);
       if (now - lastHudRef.current > 90) {
         lastHudRef.current = now;
         syncHud();
+        syncFreeRideHud();
       }
       rafRef.current = requestAnimationFrame(step);
     };
@@ -1347,7 +1572,7 @@ export default function CasterCycleApp() {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [finishRide, playSfx, playVoice, skin, syncHud, updateMotor]);
+  }, [effectivePro, finishRide, freeRideActive, playSfx, playVoice, skin, stopFreeRide, syncFreeRideHud, syncHud, updateMotor]);
 
   const resultLabel = useMemo(() => {
     if (hud.phase !== "finished") return "daily ride";
@@ -1377,26 +1602,32 @@ export default function CasterCycleApp() {
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(7,17,27,0.08),transparent_24%,transparent_70%,rgba(7,17,27,0.48))]" />
 
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 px-3 pt-3">
-        <div className="flex items-center justify-between gap-2 rounded-md border border-white/15 bg-black/28 px-3 py-2 shadow-xl backdrop-blur-md">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.16em] text-[#fbe764]">
-              <Image src="/media/castercycle.png" alt="" width={20} height={20} className="rounded object-cover" />
-              CasterCycle
+        <div className="rounded-md border border-white/12 bg-[#071018]/72 p-2 shadow-[0_20px_60px_rgba(0,0,0,0.34)] backdrop-blur-xl">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+            <Image src="/media/castercycle.png" alt="" width={34} height={34} className="h-[34px] w-[34px] rounded-md border border-white/12 object-cover" />
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.14em] text-[#fbe764]">
+                CasterCycle
+                <span className="h-1.5 w-1.5 rounded-full bg-[#a2ff9a] shadow-[0_0_12px_rgba(162,255,154,0.9)]" />
+              </div>
+              <div className="truncate text-[10px] font-semibold text-white/70">
+                {freeRideActive ? `${freeRideHud.zone} - tap anywhere to steer` : `${game.route.name} - ${game.route.tagline}`}
+              </div>
             </div>
-            <div className="truncate text-[10px] font-semibold text-white/72">{game.route.name} - {game.route.tagline}</div>
           </div>
-          <div className="flex items-center gap-1.5 text-[11px] font-bold">
-            <span className="flex items-center gap-1 rounded bg-white/10 px-2 py-1">
-              <Trophy size={13} />
-              {hud.score.toLocaleString()}
+            <div className="flex shrink-0 items-center gap-1.5 text-[11px] font-bold">
+            <span className="flex min-w-[58px] items-center justify-center gap-1 rounded-md border border-white/10 bg-white/8 px-2 py-1.5">
+              <Trophy size={13} className="text-[#fbe764]" />
+                {freeRideActive ? Math.round(freeRideHud.score).toLocaleString() : hud.score.toLocaleString()}
             </span>
-            <span className="flex items-center gap-1 rounded bg-white/10 px-2 py-1">
-              <BatteryCharging size={13} />
-              {Math.round(hud.battery)}%
+            <span className="flex min-w-[48px] items-center justify-center gap-1 rounded-md border border-white/10 bg-white/8 px-2 py-1.5">
+              <BatteryCharging size={13} className="text-[#a2ff9a]" />
+              {freeRideActive ? (freeRideHud.unlimited ? "∞" : `${Math.ceil(freeRideHud.remaining)}s`) : `${Math.round(hud.battery)}%`}
             </span>
             <button
               aria-label={audioEnabled ? "Turn sound effects off" : "Turn sound effects on"}
-              className={`pointer-events-auto relative inline-flex h-7 w-7 items-center justify-center rounded border ${audioEnabled ? "border-[#fbe764]/60 bg-[#fbe764]/18 text-[#fbe764]" : "border-white/12 bg-white/8 text-white/55"}`}
+              className={`pointer-events-auto relative inline-flex h-8 w-8 items-center justify-center rounded-md border ${audioEnabled ? "border-[#fbe764]/60 bg-[#fbe764]/18 text-[#fbe764]" : "border-white/12 bg-white/8 text-white/55"}`}
               onClick={toggleAudio}
             >
               {audioEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
@@ -1404,20 +1635,52 @@ export default function CasterCycleApp() {
             </button>
             <button
               aria-label={voiceEnabled ? "Turn route voice off" : "Turn route voice on"}
-              className={`pointer-events-auto relative inline-flex h-7 w-7 items-center justify-center rounded border ${voiceEnabled ? "border-[#7cf2ff]/60 bg-[#7cf2ff]/18 text-[#7cf2ff]" : "border-white/12 bg-white/8 text-white/55"}`}
+              className={`pointer-events-auto relative inline-flex h-8 w-8 items-center justify-center rounded-md border ${voiceEnabled ? "border-[#7cf2ff]/60 bg-[#7cf2ff]/18 text-[#7cf2ff]" : "border-white/12 bg-white/8 text-white/55"}`}
               onClick={toggleVoice}
             >
               <Radio size={14} />
               <span className={`absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ${voiceEnabled ? "bg-[#7cf2ff] shadow-[0_0_10px_rgba(124,242,255,0.95)]" : "bg-white/22"}`} />
             </button>
+            </div>
           </div>
         </div>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/25">
-          <div className="h-full rounded-full bg-[#fbe764]" style={{ width: `${Math.round(progress * 100)}%` }} />
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/25 shadow-[0_8px_24px_rgba(0,0,0,0.24)]">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-[#7cf2ff] via-[#fbe764] to-[#a2ff9a]"
+            style={{ width: `${freeRideActive && !freeRideHud.unlimited ? Math.round((freeRideHud.remaining / FREE_ROAM_SECONDS) * 100) : Math.round(progress * 100)}%` }}
+          />
         </div>
       </div>
 
-      {hud.phase === "riding" && (
+      {freeRideActive && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 px-3">
+          <div className="grid grid-cols-4 gap-2">
+            <Metric icon={<Gauge size={14} />} label="mph" value={String(Math.round(freeRideHud.speed / 8))} />
+            <Metric icon={<Trophy size={14} />} label="score" value={Math.round(freeRideHud.score).toLocaleString()} />
+            <Metric icon={<Flame size={14} />} label="combo" value={`${freeRideHud.combo}x`} />
+            <Metric icon={<BatteryCharging size={14} />} label="time" value={freeRideHud.unlimited ? "∞" : `${Math.ceil(freeRideHud.remaining)}s`} />
+          </div>
+          <div className="pointer-events-auto mt-2 grid grid-cols-4 gap-2">
+            <button aria-label="Turn left" className="inline-flex min-h-11 items-center justify-center gap-0.5 rounded-md border border-white/18 bg-black/32 px-1 text-[10px] font-black uppercase tracking-[0.04em] text-white/80 backdrop-blur-md active:scale-[0.98]" onClick={() => changeLane(-1)}>
+              <ChevronLeft size={17} />
+              Left
+            </button>
+            <button aria-label="Pedal faster" className="inline-flex min-h-11 items-center justify-center gap-0.5 rounded-md border border-[#fbe764]/50 bg-[#fbe764]/18 px-1 text-[10px] font-black uppercase tracking-[0.04em] text-[#fbe764] backdrop-blur-md active:scale-[0.98]" onClick={boostOrHop}>
+              <Zap size={16} />
+              Pedal
+            </button>
+            <button aria-label="Turn right" className="inline-flex min-h-11 items-center justify-center gap-0.5 rounded-md border border-white/18 bg-black/32 px-1 text-[10px] font-black uppercase tracking-[0.04em] text-white/80 backdrop-blur-md active:scale-[0.98]" onClick={() => changeLane(1)}>
+              Right
+              <ChevronRight size={17} />
+            </button>
+            <button className="inline-flex min-h-11 items-center justify-center rounded-md border border-[#ff5d73]/45 bg-[#ff5d73]/18 px-1 text-[10px] font-black uppercase tracking-[0.04em] text-white backdrop-blur-md active:scale-[0.98]" onClick={() => stopFreeRide(false)}>
+              Park
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!freeRideActive && hud.phase === "riding" && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 px-3">
           <div className="grid grid-cols-4 gap-2">
             <Metric icon={<Gauge size={14} />} label="mph" value={String(Math.round(hud.speed / 8))} />
@@ -1460,9 +1723,9 @@ export default function CasterCycleApp() {
         </div>
       )}
 
-      {hud.phase !== "riding" && (
+      {!freeRideActive && hud.phase !== "riding" && (
         <section className="pointer-events-auto absolute inset-x-0 bottom-0 z-20 px-3 pb-3">
-          <div className="no-scrollbar max-h-[88dvh] overflow-y-auto overscroll-contain rounded-md border border-white/15 bg-[#111923]/92 p-4 shadow-2xl backdrop-blur-xl">
+          <div className="no-scrollbar max-h-[88dvh] overflow-y-auto overscroll-contain rounded-md border border-white/12 bg-[#071018]/94 p-4 shadow-[0_-26px_80px_rgba(0,0,0,0.46)] backdrop-blur-2xl">
             {hud.phase === "ready" && showIntro ? (
               <OnboardingPanel
                 step={introStep}
@@ -1484,10 +1747,10 @@ export default function CasterCycleApp() {
               />
             ) : (
               <>
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start justify-between gap-4 rounded-md border border-white/8 bg-white/[0.04] p-3">
                   <div className="min-w-0">
                     <div className="text-[10px] font-black uppercase tracking-[0.2em] text-[#7cf2ff]">{resultLabel}</div>
-                    <h1 className="mt-1 text-3xl font-black leading-none tracking-normal text-white">CasterCycle</h1>
+                    <h1 className="mt-1 text-2xl font-black leading-none tracking-normal text-white">CasterCycle</h1>
                     <p className="mt-2 max-w-[20rem] text-sm font-medium leading-5 text-white/68">
                       {hud.phase === "finished"
                         ? `${displayName} scored ${hud.score.toLocaleString()} on ${game.route.name}.`
@@ -1505,7 +1768,7 @@ export default function CasterCycleApp() {
                   </div>
                 </div>
 
-                <div className="mt-4 grid grid-cols-5 gap-1 rounded-md border border-white/10 bg-black/18 p-1">
+                <div className="mt-3 grid grid-cols-5 gap-1 rounded-md border border-white/10 bg-[#02070c]/55 p-1 shadow-inner">
                   {([
                     { id: "ride", label: "Worlds", icon: <Map size={15} /> },
                     { id: "shop", label: "Shop", icon: <Wallet size={15} /> },
@@ -1515,8 +1778,8 @@ export default function CasterCycleApp() {
                   ] as { id: DashboardTab; label: string; icon: React.ReactNode }[]).map((item) => (
                     <button
                       key={item.id}
-                      className={`inline-flex min-h-10 items-center justify-center gap-1 rounded text-[10px] font-black uppercase tracking-[0.06em] transition active:scale-[0.98] ${
-                        dashboardTab === item.id ? "bg-[#fbe764] text-[#111923]" : "text-white/62 hover:bg-white/8"
+                      className={`inline-flex min-h-10 items-center justify-center gap-1 rounded-md text-[10px] font-black uppercase tracking-[0.05em] transition active:scale-[0.98] ${
+                        dashboardTab === item.id ? "bg-[#fbe764] text-[#071018] shadow-[0_10px_22px_rgba(251,231,100,0.18)]" : "text-white/60 hover:bg-white/8"
                       }`}
                       onClick={() => {
                         haptic("selection");
@@ -1539,10 +1802,13 @@ export default function CasterCycleApp() {
                       bestAll={Math.max(stats.bestAll, hud.score)}
                       streak={stats.streak}
                       proActive={effectivePro}
+                      dayActive={dayActive}
                       lifetimeActive={annualActive}
                       sharing={sharing}
                       onSelect={chooseRideArea}
                       onStart={startRide}
+                      onFreeRide={startFreeRide}
+                      onShop={() => setDashboardTab("shop")}
                       onShare={hud.phase === "finished" ? shareRide : shareApp}
                     />
 
@@ -1583,7 +1849,7 @@ export default function CasterCycleApp() {
                     <UpgradePanel
                       enabled={isConnected}
                       isPro={effectivePro}
-                      weeklyActive={weeklyActive}
+                      dayActive={dayActive}
                       annualActive={annualActive}
                       onConnect={connectWallet}
                       onEthSupport={unlockEthSupporter}
@@ -1866,10 +2132,13 @@ function WorldHub({
   bestAll,
   streak,
   proActive,
+  dayActive,
   lifetimeActive,
   sharing,
   onSelect,
   onStart,
+  onFreeRide,
+  onShop,
   onShare,
 }: {
   selected: RideArea;
@@ -1879,10 +2148,13 @@ function WorldHub({
   bestAll: number;
   streak: number;
   proActive: boolean;
+  dayActive: boolean;
   lifetimeActive: boolean;
   sharing: boolean;
   onSelect: (area: RideArea) => void;
   onStart: () => void;
+  onFreeRide: () => void;
+  onShop: () => void;
   onShare: () => void;
 }) {
   const worldMeta: Record<RideArea, { kicker: string; badge: string; access: string; feature: string; lockText: string }> = {
@@ -1902,7 +2174,7 @@ function WorldHub({
     },
     bikeLand: {
       kicker: "Premium",
-      badge: "$0.99 week",
+      badge: "$1 day",
       access: lifetimeActive ? "Lifetime" : proActive ? "Unlocked" : "Cycle Pass",
       feature: "Pump tracks, neon lanes, club drops, and future premium worlds.",
       lockText: "Unlock",
@@ -1911,6 +2183,7 @@ function WorldHub({
 
   const canRide = (area: RideArea) => area === "park" || area === "statePark" || (area === "bikeLand" && proActive);
   const selectedRoute = routeForArea(selected);
+  const passLabel = lifetimeActive ? "Lifetime unlocked" : dayActive ? "Day pass active" : "30s free roam";
 
   return (
     <div className="mt-4">
@@ -1932,18 +2205,33 @@ function WorldHub({
         <ResultStat label="streak" value={String(streak)} />
       </div>
 
-      <div className="mt-3 rounded-md border border-[#7cf2ff]/22 bg-[#7cf2ff]/9 p-3">
-        <div className="flex items-center justify-between gap-3">
+      <div className="mt-3 flex items-center justify-between gap-2 rounded-md border border-white/10 bg-white/[0.05] px-3 py-2">
+        <div className="min-w-0">
+          <div className="text-[9px] font-black uppercase tracking-[0.16em] text-white/42">park access</div>
+          <div className="truncate text-sm font-black text-white">{passLabel}</div>
+        </div>
+        <button
+          className="inline-flex min-h-9 shrink-0 items-center justify-center gap-1 rounded-md border border-[#fbe764]/45 bg-[#fbe764]/14 px-3 text-[11px] font-black text-[#fbe764] active:scale-[0.98]"
+          onClick={proActive ? onFreeRide : onShop}
+        >
+          {proActive ? <Bike size={14} /> : <Crown size={14} />}
+          {proActive ? "Roam" : "Upgrade"}
+        </button>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+      <div className="rounded-md border border-[#7cf2ff]/22 bg-[#7cf2ff]/9 p-3">
+        <div className="flex h-full flex-col justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#7cf2ff]">
               <Gauge size={13} />
               Daily dash
             </div>
             <div className="mt-1 text-sm font-black text-white">Forward score run</div>
-            <div className="mt-1 text-xs font-semibold leading-4 text-white/55">Straight racer, fast hazards, leaderboard score.</div>
+            <div className="mt-1 text-xs font-semibold leading-4 text-white/55">Fast hazards, clean lines, leaderboard score.</div>
           </div>
           <button
-            className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-3 text-xs font-black text-[#111923] active:scale-[0.98]"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-3 text-xs font-black text-[#111923] active:scale-[0.98]"
             onClick={onStart}
           >
             <Play size={15} />
@@ -1952,7 +2240,41 @@ function WorldHub({
         </div>
       </div>
 
-      <div className="relative mt-3 grid gap-2 rounded-md border border-white/10 bg-black/16 p-2">
+      <div className="rounded-md border border-[#a2ff9a]/24 bg-[#a2ff9a]/10 p-3">
+        <div className="flex h-full flex-col justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#a2ff9a]">
+              <Map size={13} />
+              Freestyle park
+            </div>
+            <div className="mt-1 text-sm font-black text-white">Open world ride</div>
+            <div className="mt-1 text-xs font-semibold leading-4 text-white/55">Choose any direction. Free timer, pass unlocks unlimited.</div>
+          </div>
+          <button
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[#a2ff9a] px-3 text-xs font-black text-[#111923] active:scale-[0.98]"
+            onClick={onFreeRide}
+          >
+            <Bike size={15} />
+            Roam
+          </button>
+        </div>
+      </div>
+      </div>
+
+      {!proActive && (
+        <button
+          className="mt-2 flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-[#fbe764]/35 bg-[#fbe764]/12 px-3 text-left active:scale-[0.99]"
+          onClick={onShop}
+        >
+          <span className="min-w-0">
+            <span className="block text-[9px] font-black uppercase tracking-[0.14em] text-[#fbe764]">Cycle Pass</span>
+            <span className="block truncate text-sm font-black text-white">$1 day or $7 lifetime unlimited</span>
+          </span>
+          <Crown size={17} className="shrink-0 text-[#fbe764]" />
+        </button>
+      )}
+
+      <div className="relative mt-3 grid gap-2 rounded-md border border-white/10 bg-[#02070c]/42 p-2">
         <div className="pointer-events-none absolute bottom-8 left-[62px] top-8 w-1 rounded-full bg-white/12" />
         {ROUTES.map((route) => {
           const meta = worldMeta[route.area];
@@ -2001,7 +2323,7 @@ function WorldHub({
           onClick={onStart}
         >
           {phase === "finished" ? <RotateCcw size={18} /> : <Play size={18} />}
-          {phase === "finished" ? "Ride Again" : "Free Ride"}
+          {phase === "finished" ? "Ride Again" : "Dash Ride"}
         </button>
         <button
           className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-4 text-sm font-black text-[#111923] transition active:scale-[0.98] disabled:opacity-70"
@@ -2093,7 +2415,7 @@ function AreaPicker({
     {
       id: "bikeLand" as RideArea,
       label: "E-Bike Land",
-      meta: lifetimeActive ? "Lifetime" : proActive ? "Unlocked" : "$0.99 / $7",
+      meta: lifetimeActive ? "Lifetime" : proActive ? "Unlocked" : "$1 / $7",
       icon: proActive ? <Zap size={15} /> : <Lock size={15} />,
       locked: !proActive,
     },
@@ -2614,7 +2936,7 @@ function LoungePanel({ proActive, user }: { proActive: boolean; user?: { fid?: n
 function UpgradePanel({
   enabled,
   isPro,
-  weeklyActive,
+  dayActive,
   annualActive,
   onConnect,
   onEthSupport,
@@ -2623,21 +2945,21 @@ function UpgradePanel({
 }: {
   enabled: boolean;
   isPro: boolean;
-  weeklyActive: boolean;
+  dayActive: boolean;
   annualActive: boolean;
   onConnect: () => void;
   onEthSupport: () => void;
-  onPassPurchased: (plan: "weekly" | "lifetime") => void;
+  onPassPurchased: (plan: PassPlan) => void;
   onVoiceInfo: () => void;
 }) {
   const { address } = useAccount();
   const chainId = useChainId();
   const { switchChain } = useSwitchChain();
-  const [plan, setPlan] = useState<"weekly" | "lifetime">("weekly");
-  const [pendingPlan, setPendingPlan] = useState<"weekly" | "lifetime" | null>(null);
+  const [plan, setPlan] = useState<PassPlan>("day");
+  const [pendingPlan, setPendingPlan] = useState<PassPlan | null>(null);
   const [step, setStep] = useState<"idle" | "buying">("idle");
-  const price = BigInt(plan === "weekly" ? WEEKLY_PRICE : YEARLY_PRICE);
-  const priceLabel = plan === "weekly" ? "$0.99 weekly" : "$7 lifetime";
+  const price = BigInt(plan === "day" ? DAY_PRICE : YEARLY_PRICE);
+  const priceLabel = plan === "day" ? "$1 day" : "$7 lifetime";
 
   const { data: balance } = useReadContract({
     address: USDC_CONTRACT,
@@ -2655,7 +2977,7 @@ function UpgradePanel({
   const hasEnough = typeof balance === "bigint" && balance >= price;
   const busy = buying || sendingEth || confirmingEth || step !== "idle";
   const treasuryReady = !!TREASURY_ADDRESS && ETH_ADDRESS_REGEX_CLIENT.test(TREASURY_ADDRESS);
-  const selectedPlanActive = plan === "weekly" ? weeklyActive : annualActive;
+  const selectedPlanActive = plan === "day" ? dayActive : annualActive;
 
   useEffect(() => {
     if (bought && step === "buying") {
@@ -2686,7 +3008,7 @@ function UpgradePanel({
       address: USDC_CONTRACT,
       abi: USDC_ABI,
       functionName: "transfer",
-      args: [TREASURY_ADDRESS, BigInt(plan === "weekly" ? WEEKLY_PRICE : YEARLY_PRICE)],
+      args: [TREASURY_ADDRESS, BigInt(plan === "day" ? DAY_PRICE : YEARLY_PRICE)],
       chainId: BASE_CHAIN_ID,
     });
   };
@@ -2709,16 +3031,15 @@ function UpgradePanel({
   };
 
   return (
-    <div className="mt-4 rounded-md border border-[#fbe764]/30 bg-[#fbe764]/10 p-3">
-      <div className="flex items-center justify-between gap-2">
+    <div className="mt-4 rounded-md border border-[#fbe764]/30 bg-[linear-gradient(135deg,rgba(251,231,100,0.14),rgba(124,242,255,0.07)_52%,rgba(162,255,154,0.09))] p-3 shadow-[0_18px_48px_rgba(0,0,0,0.22)]">
+      <div className="flex items-start justify-between gap-2">
         <div>
           <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#fbe764]">
             <Crown size={13} />
             Cycle Pass
           </div>
-          <div className="mt-1 text-xs font-semibold text-white/64">
-            Community Park and State Park are open. Cycle Pass unlocks E-Bike Land, Carbon Pro, the club lounge, and future premium rides.
-          </div>
+          <div className="mt-1 text-xl font-black leading-tight text-white">Unlimited park riding</div>
+          <div className="mt-1 text-xs font-semibold leading-4 text-white/64">30 seconds free. Pass unlocks Freestyle, E-Bike Land, Carbon Pro, and the lounge.</div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <button
@@ -2733,32 +3054,34 @@ function UpgradePanel({
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <button
-          className="rounded-md border px-2 py-2 text-xs font-black text-white"
-          style={{ borderColor: plan === "weekly" ? "#fbe764" : "rgba(255,255,255,0.14)" }}
-          onClick={() => setPlan("weekly")}
+          className={`rounded-md border px-3 py-3 text-left transition active:scale-[0.98] ${plan === "day" ? "bg-[#fbe764]/18" : "bg-black/16"}`}
+          style={{ borderColor: plan === "day" ? "#fbe764" : "rgba(255,255,255,0.14)" }}
+          onClick={() => setPlan("day")}
         >
-          <span className="block">Weekly $0.99</span>
-          <span className="mt-1 block text-[10px] font-bold text-white/52">E-Bike Land</span>
+          <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-[#fbe764]">day pass</span>
+          <span className="mt-1 block text-base font-black text-white">$1</span>
+          <span className="mt-1 block text-[10px] font-bold text-white/52">Unlimited today</span>
         </button>
         <button
-          className="rounded-md border px-2 py-2 text-xs font-black text-white"
+          className={`rounded-md border px-3 py-3 text-left transition active:scale-[0.98] ${plan === "lifetime" ? "bg-[#fbe764]/18" : "bg-black/16"}`}
           style={{ borderColor: plan === "lifetime" ? "#fbe764" : "rgba(255,255,255,0.14)" }}
           onClick={() => setPlan("lifetime")}
         >
-          <span className="block">Lifetime $7</span>
+          <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-[#fbe764]">lifetime</span>
+          <span className="mt-1 block text-base font-black text-white">$7</span>
           <span className="mt-1 block text-[10px] font-bold text-white/52">All worlds</span>
         </button>
       </div>
       <button
-        className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[#fbe764] px-3 text-xs font-black text-[#111923] disabled:opacity-60"
+        className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-[#fbe764] px-3 text-sm font-black text-[#071018] shadow-[0_14px_28px_rgba(251,231,100,0.18)] disabled:opacity-60"
         disabled={enabled && (!hasEnough || busy || !treasuryReady || selectedPlanActive)}
         onClick={purchase}
       >
         <Wallet size={15} />
         {!enabled
           ? "Connect for Base USDC"
-          : selectedPlanActive
-            ? plan === "weekly" ? "Weekly Active" : "Lifetime Active"
+            : selectedPlanActive
+            ? plan === "day" ? "Day Active" : "Lifetime Active"
             : !treasuryReady
               ? "Set treasury address"
               : chainId !== BASE_CHAIN_ID
@@ -2769,6 +3092,20 @@ function UpgradePanel({
                   ? `Buy ${priceLabel}`
                   : "Need USDC on Base"}
       </button>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        <div className="rounded-md border border-white/10 bg-black/14 px-2 py-1.5 text-center">
+          <div className="text-[8px] font-black uppercase tracking-[0.08em] text-white/36">chain</div>
+          <div className="text-[10px] font-black text-white">Base</div>
+        </div>
+        <div className="rounded-md border border-white/10 bg-black/14 px-2 py-1.5 text-center">
+          <div className="text-[8px] font-black uppercase tracking-[0.08em] text-white/36">pay</div>
+          <div className="text-[10px] font-black text-white">USDC</div>
+        </div>
+        <div className="rounded-md border border-white/10 bg-black/14 px-2 py-1.5 text-center">
+          <div className="text-[8px] font-black uppercase tracking-[0.08em] text-white/36">unlock</div>
+          <div className="text-[10px] font-black text-white">Local</div>
+        </div>
+      </div>
       <button
         className="mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/15 px-3 text-xs font-black text-white disabled:opacity-60"
         disabled={enabled && (!treasuryReady || busy)}
@@ -2790,6 +3127,339 @@ function lanePoint(width: number, height: number, lane: number, progress: number
   const y = horizon + progress * (bottom - horizon);
   const spread = 18 + progress * width * 0.28;
   return { x: width / 2 + lane * spread, y, scale: 0.25 + progress * 1.18 };
+}
+
+function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height: number, free: FreeRideModel, skin: Skin, unlimited: boolean, now: number) {
+  ctx.save();
+  const sky = ctx.createLinearGradient(0, 0, 0, height);
+  sky.addColorStop(0, "#70b7e7");
+  sky.addColorStop(0.38, "#8ed47b");
+  sky.addColorStop(1, "#2f744f");
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.save();
+  ctx.translate(width / 2, height * 0.56);
+  ctx.translate(-free.x, -free.y);
+  drawFreestyleMap(ctx, now, free);
+  ctx.restore();
+
+  drawFreeRidePlayer(ctx, width / 2, height * 0.56, free.heading, skin, now);
+
+  ctx.fillStyle = "rgba(7,16,24,0.62)";
+  ctx.strokeStyle = unlimited ? "#a2ff9a" : "#fbe764";
+  ctx.lineWidth = 2;
+  roundRect(ctx, 14, height * 0.13, Math.min(width - 28, 330), 54, 10);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = unlimited ? "#a2ff9a" : "#fbe764";
+  ctx.font = "900 10px system-ui, sans-serif";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(unlimited ? "UNLIMITED FREESTYLE" : `${Math.ceil(free.remaining)}S FREE RIDE`, 30, height * 0.13 + 19);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "900 16px system-ui, sans-serif";
+  ctx.fillText(free.zone, 30, height * 0.13 + 39);
+
+  if (free.messageT > 0 && free.message) {
+    ctx.save();
+    const alpha = clamp(free.messageT, 0, 1);
+    const cardW = Math.min(width - 52, 270);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = "rgba(7,16,24,0.68)";
+    ctx.strokeStyle = skin.trail;
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, width / 2 - cardW / 2, height * 0.23, cardW, 42, 10);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "900 13px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(free.message.toUpperCase(), width / 2, height * 0.23 + 21);
+    ctx.restore();
+  }
+
+  const compassX = width - 58;
+  const compassY = height * 0.19;
+  ctx.save();
+  ctx.translate(compassX, compassY);
+  ctx.fillStyle = "rgba(7,16,24,0.58)";
+  ctx.beginPath();
+  ctx.arc(0, 0, 34, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.rotate(free.heading + Math.PI / 2);
+  ctx.fillStyle = "#fbe764";
+  ctx.beginPath();
+  ctx.moveTo(0, -24);
+  ctx.lineTo(10, 10);
+  ctx.lineTo(0, 4);
+  ctx.lineTo(-10, 10);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  drawFreeRideMiniMap(ctx, width, height, free, unlimited);
+
+  drawVignette(ctx, width, height, { boost: clamp(free.speed / 420, 0, 1) } as GameModel);
+  ctx.restore();
+}
+
+function drawFreeRideMiniMap(ctx: CanvasRenderingContext2D, width: number, height: number, free: FreeRideModel, unlimited: boolean) {
+  const mapW = Math.min(154, width * 0.32);
+  const mapH = mapW;
+  const x = width - mapW - 14;
+  const y = height * 0.28;
+  const scale = mapW / 2600;
+
+  ctx.save();
+  ctx.fillStyle = "rgba(7,16,24,0.62)";
+  ctx.strokeStyle = unlimited ? "rgba(162,255,154,0.72)" : "rgba(251,231,100,0.7)";
+  ctx.lineWidth = 2;
+  roundRect(ctx, x, y, mapW, mapH, 12);
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  roundRect(ctx, x, y, mapW, mapH, 12);
+  ctx.clip();
+
+  ctx.strokeStyle = "rgba(159,242,138,0.42)";
+  ctx.lineWidth = 4;
+  for (const path of [
+    [[-1040, -760], [-600, -520], [-180, -360], [260, -80], [880, 120]],
+    [[-980, 120], [-500, 10], [-60, 40], [480, -160], [1060, -580]],
+    [[-880, 820], [-340, 520], [140, 520], [760, 760]],
+    [[0, -1180], [0, -620], [0, -60], [0, 700], [0, 1120]],
+  ]) {
+    ctx.beginPath();
+    path.forEach(([px, py], index) => {
+      const sx = x + mapW / 2 + px * scale;
+      const sy = y + mapH / 2 + py * scale;
+      if (index === 0) ctx.moveTo(sx, sy);
+      else ctx.lineTo(sx, sy);
+    });
+    ctx.stroke();
+  }
+
+  for (const spot of FREE_RIDE_SPOTS) {
+    if (spot.name === "Trailhead") continue;
+    ctx.fillStyle = spot.color;
+    ctx.beginPath();
+    ctx.arc(x + mapW / 2 + spot.x * scale, y + mapH / 2 + spot.y * scale, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.fillStyle = "#fbe764";
+  ctx.strokeStyle = "#101923";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(x + mapW / 2 + free.x * scale, y + mapH / 2 + free.y * scale, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawFreestyleMap(ctx: CanvasRenderingContext2D, now: number, free: FreeRideModel) {
+  ctx.fillStyle = "#69bd68";
+  ctx.fillRect(-1400, -1400, 2800, 2800);
+
+  ctx.strokeStyle = "rgba(13,61,50,0.18)";
+  ctx.lineWidth = 2;
+  for (let x = -1400; x <= 1400; x += 160) {
+    ctx.beginPath();
+    ctx.moveTo(x, -1400);
+    ctx.lineTo(x, 1400);
+    ctx.stroke();
+  }
+  for (let y = -1400; y <= 1400; y += 160) {
+    ctx.beginPath();
+    ctx.moveTo(-1400, y);
+    ctx.lineTo(1400, y);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "#5fcbea";
+  ctx.lineWidth = 42;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-1260, 520);
+  ctx.bezierCurveTo(-760, 270, -560, 650, -160, 390);
+  ctx.bezierCurveTo(260, 116, 530, 340, 1180, 120);
+  ctx.stroke();
+
+  ctx.strokeStyle = "#314f46";
+  ctx.lineWidth = 34;
+  const paths = [
+    [[-1040, -760], [-600, -520], [-180, -360], [260, -80], [880, 120]],
+    [[-980, 120], [-500, 10], [-60, 40], [480, -160], [1060, -580]],
+    [[-880, 820], [-340, 520], [140, 520], [760, 760]],
+    [[0, -1180], [0, -620], [0, -60], [0, 700], [0, 1120]],
+  ];
+  for (const path of paths) {
+    ctx.beginPath();
+    path.forEach(([x, y], index) => {
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "#fbe764";
+  ctx.lineWidth = 4;
+  ctx.setLineDash([28, 34]);
+  for (const path of paths) {
+    ctx.beginPath();
+    path.forEach(([x, y], index) => {
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  drawFreestyleCourt(ctx, -760, -530, 300, 190, "#c9d4d7", "SKATE");
+  drawFreestyleCourt(ctx, 610, -500, 260, 160, "#d46a43", "HOOPS");
+  drawFreestyleCourt(ctx, 285, -540, 260, 150, "#3da06f", "TENNIS");
+  drawFreestyleCourt(ctx, 760, 360, 420, 235, "#4a9b44", "SOCCER");
+  drawFreestyleCourt(ctx, -560, 420, 260, 160, "#206857", "STREAM");
+  drawFreestyleCourt(ctx, 110, -980, 280, 190, "#2e714d", "PINES");
+
+  for (const spot of FREE_RIDE_SPOTS) {
+    if (spot.name === "Trailhead") continue;
+    drawFreestyleBoostPad(ctx, spot.x, spot.y, spot.color, free.visitedZones.includes(spot.name), now);
+  }
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(251,231,100,0.38)";
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.setLineDash([18, 28]);
+  ctx.beginPath();
+  ctx.moveTo(-1180, -1040);
+  ctx.bezierCurveTo(-760, -850, -340, -1160, 80, -980);
+  ctx.bezierCurveTo(420, -830, 770, -1040, 1010, -890);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  ctx.fillStyle = "#1e6a42";
+  for (let i = 0; i < 90; i += 1) {
+    const x = ((i * 173) % 2600) - 1300;
+    const y = ((i * 311) % 2600) - 1300;
+    if (Math.abs(x) < 95 || Math.abs(y) < 95) continue;
+    const r = 10 + ((i * 7) % 16);
+    ctx.beginPath();
+    ctx.arc(x + Math.sin(now / 900 + i) * 1.8, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = "rgba(255,122,223,0.78)";
+  ctx.lineWidth = 12;
+  ctx.shadowColor = "#ff7adf";
+  ctx.shadowBlur = 12;
+  ctx.beginPath();
+  ctx.ellipse(1010, -890, 170, 100, -0.18, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  drawFreestyleLabel(ctx, 1010, -890, "E-BIKE LAND");
+}
+
+function drawFreestyleBoostPad(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, visited: boolean, now: number) {
+  const pulse = 0.5 + Math.sin(now / 180 + x * 0.01) * 0.5;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = color;
+  ctx.fillStyle = visited ? `${color}40` : `${color}24`;
+  ctx.lineWidth = visited ? 7 : 5;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = visited ? 18 : 10;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 58 + pulse * 10, 28 + pulse * 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-22, 0);
+  ctx.lineTo(-4, -12);
+  ctx.lineTo(-8, -2);
+  ctx.lineTo(18, -2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawFreestyleCourt(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, color: string, label: string) {
+  ctx.fillStyle = color;
+  ctx.strokeStyle = "rgba(255,255,255,0.72)";
+  ctx.lineWidth = 5;
+  roundRect(ctx, x - w / 2, y - h / 2, w, h, 12);
+  ctx.fill();
+  ctx.stroke();
+  drawFreestyleLabel(ctx, x, y, label);
+}
+
+function drawFreestyleLabel(ctx: CanvasRenderingContext2D, x: number, y: number, label: string) {
+  ctx.fillStyle = "rgba(7,16,24,0.72)";
+  roundRect(ctx, x - 64, y - 21, 128, 42, 8);
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "900 16px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, x, y + 1);
+}
+
+function drawFreeRidePlayer(ctx: CanvasRenderingContext2D, x: number, y: number, heading: number, skin: Skin, now: number) {
+  const pulse = 0.5 + Math.sin(now / 130) * 0.5;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(heading + Math.PI / 2);
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  ctx.strokeStyle = skin.trail;
+  ctx.globalAlpha = 0.28 + pulse * 0.18;
+  ctx.lineWidth = 8;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-18, 38);
+  ctx.quadraticCurveTo(-28, 72, -18, 114);
+  ctx.moveTo(18, 38);
+  ctx.quadraticCurveTo(28, 72, 18, 114);
+  ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = "rgba(0,0,0,0.28)";
+  ctx.beginPath();
+  ctx.ellipse(0, 22, 34, 10, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 7;
+  ctx.beginPath();
+  ctx.arc(-22, 28, 16, 0, Math.PI * 2);
+  ctx.arc(22, 28, 16, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = skin.frame;
+  ctx.lineWidth = 8;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-22, 28);
+  ctx.lineTo(0, -12);
+  ctx.lineTo(22, 28);
+  ctx.moveTo(0, -12);
+  ctx.lineTo(0, 20);
+  ctx.stroke();
+  ctx.fillStyle = skin.battery;
+  roundRect(ctx, -16, -6, 32, 26, 6);
+  ctx.fill();
+  ctx.fillStyle = "#f6d2a8";
+  ctx.beginPath();
+  ctx.arc(0, -34, 12, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#ff5d73";
+  ctx.beginPath();
+  ctx.ellipse(0, -46, 18 + Math.sin(now / 160) * 1.5, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 function drawScene(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel, skin: Skin, now: number) {

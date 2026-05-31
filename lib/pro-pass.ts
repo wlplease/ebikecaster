@@ -3,7 +3,7 @@ export const TREASURY_ADDRESS =
   (process.env.NEXT_PUBLIC_TREASURY_ADDRESS || "0x76bC75Ef2F1f0F25e078641910D8E23A430204F5") as `0x${string}`;
 
 export const USDC_CONTRACT = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as `0x${string}`;
-export const WEEKLY_PRICE = 990_000;
+export const DAY_PRICE = 1_000_000;
 export const YEARLY_PRICE = 7_000_000;
 export const ETH_SUPPORT_AMOUNT = "0.0003";
 

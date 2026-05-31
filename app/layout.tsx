@@ -40,7 +40,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "CasterCycle",
     description:
-      "Freestyle e-bike parks, paid bike worlds, clean club chat, and Farcaster scores.",
+      "Free 30-second freestyle park rides, unlimited Cycle Pass play, clean club chat, and Farcaster scores.",
     url: APP_URL,
     images: [{ url: appUrl("/media/castercycle-hero.png"), width: 1200, height: 630 }],
   },
