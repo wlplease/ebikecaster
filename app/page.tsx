@@ -28,10 +28,11 @@ import {
   Zap,
 } from "lucide-react";
 import { sdk } from "@farcaster/miniapp-sdk";
-import { parseEther } from "viem";
+import { formatUnits, parseEther } from "viem";
 import { useAccount, useChainId, useConnect, useReadContract, useSendTransaction, useSwitchChain, useWaitForTransactionReceipt, useWriteContract } from "wagmi";
 import { useFarcasterUser } from "@/components/farcaster-gate";
 import { CASTER_CREDITS_ABI, CASTER_CREDITS_CONTRACT, type RewardClaimPayload } from "@/lib/reward-credits";
+import { TOKEN_TROPHY_ABI, TOKEN_TROPHY_VAULT, type TokenTrophyClaimPayload, type TokenTrophyPeriod } from "@/lib/token-trophies";
 import {
   BASE_CHAIN_ID,
   DAY_PRICE,
@@ -59,6 +60,12 @@ const KINGBULL_RANGER_URL = "https://sovrn.co/1f76den";
 const KINGBULL_SOVRN_URL = KINGBULL_RANGER_URL;
 const KINGBULL_COUPON_CODE = process.env.NEXT_PUBLIC_KINGBULL_COUPON_CODE || "GET50OFF";
 const KINGBULL_REDDIT_SEARCH_URL = "https://www.reddit.com/r/ebikes/search/?q=kingbull%20ranger&restrict_sr=1";
+const EBIKE_TOKEN_ADDRESS = (process.env.NEXT_PUBLIC_EBIKE_TOKEN_ADDRESS || "0x1471C903A19Ea87097e4523924D17F2C5Ead2B07") as `0x${string}`;
+const EBIKE_TOKEN_SYMBOL = process.env.NEXT_PUBLIC_EBIKE_TOKEN_SYMBOL || "EBIKE";
+const EBIKE_TOKEN_DECIMALS = Number(process.env.NEXT_PUBLIC_EBIKE_TOKEN_DECIMALS || "18");
+const EBIKE_TOKEN_INFO_URL = process.env.NEXT_PUBLIC_EBIKE_TOKEN_INFO_URL || "";
+const EBIKE_TOKEN_MARKET_URL = process.env.NEXT_PUBLIC_EBIKE_TOKEN_MARKET_URL || "";
+const TERMS_URL = `${APP_URL}/terms`;
 
 type RidePhase = "ready" | "riding" | "finished";
 type Lane = -1 | 0 | 1;
@@ -110,7 +117,7 @@ type Skin = {
   frame: string;
   battery: string;
   trail: string;
-  unlock: "base" | "streak" | "score" | "pro" | "supporter";
+  unlock: "base" | "streak" | "score" | "pro" | "supporter" | "token";
   label: string;
 };
 
@@ -247,6 +254,8 @@ type FreeRideModel = {
   combo: number;
   pickupCooldown: number;
   lastBoostSpot: string | null;
+  jumpLines: number;
+  lastJumpLineDistance: number;
   voiceCooldown: number;
   submitted: boolean;
   terrain: string;
@@ -345,6 +354,7 @@ const SKINS: Skin[] = [
   { id: "carbon", name: "Carbon Pro", frame: "#f7fbff", battery: "#c4b5fd", trail: "#c4b5fd", unlock: "pro", label: "Cycle Pass" },
   { id: "forest", name: "Forest Cruiser", frame: "#9ff28a", battery: "#fbe764", trail: "#9ff28a", unlock: "base", label: "State Park" },
   { id: "neon", name: "Glow Track", frame: "#ff7adf", battery: "#7cf2ff", trail: "#ff7adf", unlock: "pro", label: "E-Bike Land" },
+  { id: "token", name: "Token Rider", frame: "#35f6c8", battery: "#fbe764", trail: "#35f6c8", unlock: "token", label: `${EBIKE_TOKEN_SYMBOL} holder` },
 ];
 
 const RANGER_STATS = [
@@ -564,6 +574,13 @@ function yesterdayKey(key: string) {
   const [year, month, day] = key.split("-").map(Number);
   const date = new Date(year, month - 1, day);
   date.setDate(date.getDate() - 1);
+  return localDateKey(date);
+}
+
+function daysBeforeKey(key: string, days: number) {
+  const [year, month, day] = key.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() - days);
   return localDateKey(date);
 }
 
@@ -825,6 +842,7 @@ function skinRideStats(skin: Skin) {
   if (skin.id === "mint") return { label: "Agile", speed: 1.02, boost: 1.04, grass: 0.94, turn: 1.16 };
   if (skin.id === "sunset") return { label: "Sprint", speed: 1.07, boost: 1.08, grass: 1.02, turn: 0.98 };
   if (skin.id === "spark") return { label: "Base", speed: 1.04, boost: 1.12, grass: 1, turn: 1.02 };
+  if (skin.id === "token") return { label: "Token", speed: 1.03, boost: 1.09, grass: 0.96, turn: 1.1 };
   return { label: "Balanced", speed: 1, boost: 1, grass: 1, turn: 1 };
 }
 
@@ -875,6 +893,21 @@ function freeRideObjectives(free: FreeRideModel): ParkObjective[] {
   const comboTarget = free.area === "bikeLand" ? 10 : free.area === "statePark" ? 8 : 7;
   const event = dailyParkEvent();
   const eventDone = free.visitedZones.includes(event.spot);
+  const paidMission = dateSeed(localDateKey()) % 2 === 0
+    ? {
+        id: "paid-charge",
+        label: "Paid",
+        value: free.visitedZones.includes("Charge Plaza") ? "charge" : "Charge",
+        progress: free.visitedZones.includes("Charge Plaza") ? 1 : 0,
+        done: free.visitedZones.includes("Charge Plaza"),
+      }
+    : {
+        id: "paid-jumps",
+        label: "Paid",
+        value: `${Math.min(free.jumpLines, 3)}/3 jumps`,
+        progress: clamp(free.jumpLines / 3, 0, 1),
+        done: free.jumpLines >= 3,
+      };
   return [
     {
       id: "zones",
@@ -898,11 +931,11 @@ function freeRideObjectives(free: FreeRideModel): ParkObjective[] {
       done: free.combo >= comboTarget,
     },
     {
-      id: "event",
-      label: "Daily",
-      value: eventDone ? "hit" : event.spot.split(" ")[0],
-      progress: eventDone ? 1 : 0,
-      done: eventDone,
+      id: free.area === "bikeLand" ? paidMission.id : "event",
+      label: free.area === "bikeLand" ? paidMission.label : "Daily",
+      value: free.area === "bikeLand" ? paidMission.value : eventDone ? "hit" : event.spot.split(" ")[0],
+      progress: free.area === "bikeLand" ? paidMission.progress : eventDone ? 1 : 0,
+      done: free.area === "bikeLand" ? paidMission.done : eventDone,
     },
   ];
 }
@@ -942,6 +975,7 @@ export default function CasterCycleApp() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const motorAudioRef = useRef<MotorAudio | null>(null);
   const voiceRef = useRef<HTMLAudioElement | null>(null);
+  const ghostPreviewRef = useRef(false);
   const freeRideRef = useRef<FreeRideModel>({
     area: "park",
     x: 0,
@@ -957,6 +991,8 @@ export default function CasterCycleApp() {
     combo: 0,
     pickupCooldown: 0,
     lastBoostSpot: null,
+    jumpLines: 0,
+    lastJumpLineDistance: -999,
     voiceCooldown: 0,
     submitted: false,
     terrain: "Grass",
@@ -968,6 +1004,7 @@ export default function CasterCycleApp() {
   });
   const [hud, setHud] = useState<Hud>(() => emptyHud(gameRef.current));
   const [freeRideActive, setFreeRideActive] = useState(false);
+  const [ghostPreviewActive, setGhostPreviewActive] = useState(false);
   const [freeRideHud, setFreeRideHud] = useState<FreeRideHud>({
     active: false,
     speed: 0,
@@ -991,6 +1028,8 @@ export default function CasterCycleApp() {
       combo: 0,
       pickupCooldown: 0,
       lastBoostSpot: null,
+      jumpLines: 0,
+      lastJumpLineDistance: -999,
       voiceCooldown: 0,
       submitted: false,
       terrain: "Grass",
@@ -1013,6 +1052,7 @@ export default function CasterCycleApp() {
   const [dashboardTab, setDashboardTab] = useState<DashboardTab>("ride");
   const [rideArea, setRideArea] = useState<RideArea>("park");
   const [ethSupporter, setEthSupporter] = useState(false);
+  const [tokenHolder, setTokenHolder] = useState(false);
   const [dayUntil, setDayUntil] = useState(0);
   const [annualUntil, setAnnualUntil] = useState(0);
   const [audioEnabled, setAudioEnabled] = useState(false);
@@ -1045,10 +1085,11 @@ export default function CasterCycleApp() {
     if (item.unlock === "base") return true;
     if (item.unlock === "pro") return effectivePro;
     if (item.unlock === "supporter") return ethSupporter;
+    if (item.unlock === "token") return tokenHolder;
     if (item.unlock === "streak") return stats.streak >= 3;
     if (item.unlock === "score") return Math.max(stats.bestAll, hud.score) >= 5000;
     return false;
-  }, [effectivePro, ethSupporter, hud.score, stats.bestAll, stats.streak]);
+  }, [effectivePro, ethSupporter, hud.score, stats.bestAll, stats.streak, tokenHolder]);
 
   const loadStats = useCallback((dateKey: string) => {
     try {
@@ -1125,7 +1166,7 @@ export default function CasterCycleApp() {
       message: free.messageT > 0 ? free.message : "",
       objectives: freeRideObjectives(free),
       terrain: freeRideTerrain(free.x, free.y, free.area).short,
-      unlimited: effectivePro,
+      unlimited: effectivePro && !ghostPreviewRef.current,
       zone: free.zone,
     });
   }, [effectivePro, freeRideActive]);
@@ -1492,8 +1533,9 @@ export default function CasterCycleApp() {
 
   const stopFreeRide = useCallback((showShop = false) => {
     const free = freeRideRef.current;
+    const wasPreview = ghostPreviewRef.current;
     const event = dailyParkEvent(gameRef.current.dateKey);
-    if (free.distance >= 20) {
+    if (!wasPreview && free.distance >= 20) {
       setLastRecap({
         mode: "freestyle",
         title: "Freeworld recap",
@@ -1506,53 +1548,61 @@ export default function CasterCycleApp() {
         eventBonus: free.visitedZones.includes(event.spot) ? event.bonus : undefined,
       });
     }
-    submitFreestyleScore(freeRideRef.current);
+    if (!wasPreview) submitFreestyleScore(freeRideRef.current);
     setFreeRideActive(false);
+    ghostPreviewRef.current = false;
+    setGhostPreviewActive(false);
     stopMotor();
     if (showShop) {
       setDashboardTab("shop");
       setUpgradeIntent(true);
-      setToast("Keep riding with Cycle Pass");
+      setToast(wasPreview ? "Preview ended" : "Keep riding with Cycle Pass");
       haptic("warning");
       playVoice("paywall");
     }
   }, [playVoice, stopMotor, submitFreestyleScore]);
 
-  const startFreeRide = useCallback(() => {
+  const startFreeRide = useCallback((options?: { area?: RideArea; preview?: boolean }) => {
     const free = freeRideRef.current;
+    const selectedArea = options?.area ?? rideArea;
+    const preview = options?.preview === true;
     setLastRecap(null);
-    free.area = rideArea;
-    free.x = rideArea === "bikeLand" ? 1010 : rideArea === "statePark" ? 80 : 0;
-    free.y = rideArea === "bikeLand" ? -890 : rideArea === "statePark" ? -980 : 0;
+    free.area = selectedArea;
+    free.x = selectedArea === "bikeLand" ? 1010 : selectedArea === "statePark" ? 80 : 0;
+    free.y = selectedArea === "bikeLand" ? -890 : selectedArea === "statePark" ? -980 : 0;
     free.heading = -Math.PI / 2;
     free.targetHeading = free.heading;
-    free.targetSpot = destinationSpot;
-    free.speed = rideArea === "bikeLand" ? 155 : rideArea === "statePark" ? 145 : 132;
+    free.targetSpot = preview ? "Charge Plaza" : destinationSpot;
+    free.speed = selectedArea === "bikeLand" ? 155 : selectedArea === "statePark" ? 145 : 132;
     free.pedalPower = 0.35;
     free.distance = 0;
-    free.remaining = effectivePro ? FREE_ROAM_SECONDS : FREE_ROAM_SECONDS;
+    free.remaining = preview ? 10 : FREE_ROAM_SECONDS;
     free.parkScore = 0;
     free.combo = 0;
     free.pickupCooldown = 0;
     free.lastBoostSpot = null;
+    free.jumpLines = 0;
+    free.lastJumpLineDistance = -999;
     free.voiceCooldown = 0;
     free.submitted = false;
-    free.terrain = rideArea === "bikeLand" ? "Pump" : rideArea === "statePark" ? "Downhill" : "Grass";
-    free.message = "";
-    free.messageT = 0;
-    free.zone = rideArea === "bikeLand" ? "E-Bike Land" : rideArea === "statePark" ? "Pine Loop" : "Trailhead";
+    free.terrain = selectedArea === "bikeLand" ? "Neon" : selectedArea === "statePark" ? "Downhill" : "Grass";
+    free.message = preview ? "10s E-Bike Land preview" : "";
+    free.messageT = preview ? 1.8 : 0;
+    free.zone = selectedArea === "bikeLand" ? "E-Bike Land" : selectedArea === "statePark" ? "Pine Loop" : "Trailhead";
     free.warned = false;
     free.visitedZones = [free.zone];
     gameRef.current.phase = "ready";
+    ghostPreviewRef.current = preview;
+    setGhostPreviewActive(preview);
     setFreeRideActive(true);
     setUpgradeIntent(false);
     setShowIntro(false);
     setShowWelcomeBack(false);
     setDashboardTab("ride");
-    setToast(rideArea === "statePark" ? "State Park roam" : effectivePro ? "Unlimited freestyle" : "30 seconds free");
+    setToast(preview ? "10 second E-Bike Land preview" : selectedArea === "statePark" ? "State Park roam" : effectivePro ? "Unlimited freestyle" : "30 seconds free");
     haptic("success");
     playSfx("start");
-    if (voiceEnabled) playVoice("ready", { route: "Freestyle Park" });
+    if (voiceEnabled) playVoice("ready", { route: preview ? "E-Bike Land preview" : "Freestyle Park" });
   }, [destinationSpot, effectivePro, playSfx, playVoice, rideArea, voiceEnabled]);
 
   const changeLane = useCallback((direction: -1 | 1) => {
@@ -1778,25 +1828,23 @@ export default function CasterCycleApp() {
     setPassReceipts(nextReceipts);
     try {
       localStorage.setItem(`${STORAGE_PREFIX}:${key}`, String(until));
-      localStorage.setItem(`${STORAGE_PREFIX}:skin`, "carbon");
+      localStorage.setItem(`${STORAGE_PREFIX}:skin`, "neon");
       localStorage.setItem(`${STORAGE_PREFIX}:rideArea`, "bikeLand");
       localStorage.setItem(`${STORAGE_PREFIX}:passReceipts`, JSON.stringify(nextReceipts));
     } catch {}
-    setSelectedSkin("carbon");
+    setSelectedSkin("neon");
     const unlockedArea = "bikeLand";
     setRideArea(unlockedArea);
     gameRef.current = makeGame(unlockedArea);
     syncHud();
-    setToast(plan === "day" ? "Unlimited day pass active" : "Lifetime unlimited active");
+    setToast(plan === "day" ? "Glow Track unlocked for today" : "Glow Track lifetime unlocked");
     setUpgradeIntent(false);
     haptic("success");
   }, [passReceipts, syncHud]);
 
   const chooseRideArea = useCallback((area: RideArea) => {
     if (area === "bikeLand" && !effectivePro) {
-      setDashboardTab("shop");
-      setToast("Unlock E-Bike Land");
-      haptic("warning");
+      startFreeRide({ area: "bikeLand", preview: true });
       return;
     }
     setRideArea(area);
@@ -1808,7 +1856,7 @@ export default function CasterCycleApp() {
       syncHud();
     }
     haptic("selection");
-  }, [effectivePro, syncHud]);
+  }, [effectivePro, startFreeRide, syncHud]);
 
   useEffect(() => {
     loadStats(gameRef.current.dateKey);
@@ -1906,6 +1954,7 @@ export default function CasterCycleApp() {
       if (freeRideActive) {
         const free = freeRideRef.current;
         const wasRemaining = free.remaining;
+        const preview = ghostPreviewRef.current;
         if (free.messageT > 0) free.messageT = Math.max(0, free.messageT - dt);
         if (free.pickupCooldown > 0) free.pickupCooldown = Math.max(0, free.pickupCooldown - dt);
         const terrain = freeRideTerrain(free.x, free.y, free.area);
@@ -1959,6 +2008,16 @@ export default function CasterCycleApp() {
         free.y = clampedY;
         free.distance += move;
         free.parkScore += move * terrain.score * (terrain.label === parkEvent.terrain ? 1.8 : 1);
+        if (free.area === "bikeLand" && terrain.label === "Jumps" && free.distance - free.lastJumpLineDistance > 120) {
+          free.lastJumpLineDistance = free.distance;
+          free.jumpLines += 1;
+          free.combo += 1;
+          free.parkScore += 180 + free.jumpLines * 60;
+          free.message = `Jump line ${Math.min(free.jumpLines, 3)}/3`;
+          free.messageT = 1.05;
+          haptic("medium");
+          playSfx("boost");
+        }
         if (terrain.warning && free.messageT <= 0.1) {
           free.message = "Stream edge slows you";
           free.messageT = 0.7;
@@ -2002,11 +2061,11 @@ export default function CasterCycleApp() {
             playVoice("parkBoost", { route: boostSpot.short });
           }
         }
-        if (!effectivePro) free.remaining = Math.max(0, free.remaining - dt);
+        if (!effectivePro || preview) free.remaining = Math.max(0, free.remaining - dt);
         if (free.voiceCooldown > 0) free.voiceCooldown = Math.max(0, free.voiceCooldown - dt);
-        if (!effectivePro && !free.warned && free.remaining <= 5 && free.remaining > 0) {
+        if ((!effectivePro || preview) && !free.warned && free.remaining <= 5 && free.remaining > 0) {
           free.warned = true;
-          setToast("5 seconds left");
+          setToast(preview ? "Preview ending" : "5 seconds left");
           haptic("warning");
           playSfx("warning");
         }
@@ -2017,11 +2076,11 @@ export default function CasterCycleApp() {
           boost: clamp(free.speed / 430, 0, 1),
           combo: free.combo,
         });
-        if (!effectivePro && wasRemaining > 0 && free.remaining <= 0) {
+        if ((!effectivePro || preview) && wasRemaining > 0 && free.remaining <= 0) {
           stopFreeRide(true);
           playSfx("finish");
         }
-        drawFreeRideScene(ctx, width, height, free, skin, effectivePro, now);
+        drawFreeRideScene(ctx, width, height, free, skin, effectivePro && !preview, now, preview);
       } else if (current.phase === "riding") {
         const targetOffset = current.targetLane;
         current.laneOffset += (targetOffset - current.laneOffset) * Math.min(1, dt * 10);
@@ -2303,13 +2362,13 @@ export default function CasterCycleApp() {
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/25 shadow-[0_8px_24px_rgba(0,0,0,0.24)]">
           <div
             className="h-full rounded-full bg-gradient-to-r from-[#7cf2ff] via-[#fbe764] to-[#a2ff9a]"
-            style={{ width: `${freeRideActive && !freeRideHud.unlimited ? Math.round((freeRideHud.remaining / FREE_ROAM_SECONDS) * 100) : Math.round(progress * 100)}%` }}
+            style={{ width: `${freeRideActive && !freeRideHud.unlimited ? Math.round((freeRideHud.remaining / (ghostPreviewActive ? 10 : FREE_ROAM_SECONDS)) * 100) : Math.round(progress * 100)}%` }}
           />
         </div>
         <StatusRibbon
-          accent={freeRideActive ? parkEvent.color : game.route.roadEdge}
-          label={freeRideActive ? parkEvent.title : rideChapter.name}
-          value={freeRideActive ? `${parkEvent.spot} +${parkEvent.bonus}` : `${Math.round(progress * 100)}% - ${mission.label}`}
+          accent={ghostPreviewActive ? "#ff7adf" : freeRideActive ? parkEvent.color : game.route.roadEdge}
+          label={ghostPreviewActive ? "E-Bike Land Preview" : freeRideActive ? parkEvent.title : rideChapter.name}
+          value={ghostPreviewActive ? "10 seconds, then pass prompt" : freeRideActive ? `${parkEvent.spot} +${parkEvent.bonus}` : `${Math.round(progress * 100)}% - ${mission.label}`}
         />
       </div>
 
@@ -2432,30 +2491,13 @@ export default function CasterCycleApp() {
                   </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-6 gap-1 rounded-md border border-white/10 bg-[#02070c]/55 p-1 shadow-inner">
-                  {([
-                    { id: "ride", label: "Play", icon: <Play size={15} /> },
-                    { id: "shop", label: "Pass", icon: <Wallet size={15} /> },
-                    { id: "garage", label: "Bike", icon: <Bike size={15} /> },
-                    { id: "club", label: "Club", icon: <Users size={15} /> },
-                    { id: "quest", label: "Quest", icon: <Sparkles size={15} /> },
-                    { id: "leaders", label: "Rank", icon: <Trophy size={15} /> },
-                  ] as { id: DashboardTab; label: string; icon: React.ReactNode }[]).map((item) => (
-                    <button
-                      key={item.id}
-                      className={`inline-flex min-h-10 items-center justify-center gap-1 rounded-md text-[10px] font-black uppercase tracking-[0.05em] transition active:scale-[0.98] ${
-                        dashboardTab === item.id ? "bg-[#fbe764] text-[#071018] shadow-[0_10px_22px_rgba(251,231,100,0.18)]" : "text-white/60 hover:bg-white/8"
-                      }`}
-                      onClick={() => {
-                        haptic("selection");
-                        setDashboardTab(item.id);
-                      }}
-                    >
-                      {item.icon}
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
+                <DashboardNav
+                  active={dashboardTab}
+                  onSelect={(tab) => {
+                    haptic("selection");
+                    setDashboardTab(tab);
+                  }}
+                />
 
                 {dashboardTab === "ride" && (
                   <>
@@ -2476,7 +2518,7 @@ export default function CasterCycleApp() {
                     <PremiumWorldTeaser
                       proActive={effectivePro}
                       onShop={() => setDashboardTab("shop")}
-                      onGarage={() => setDashboardTab("garage")}
+                      onPreview={() => startFreeRide({ area: "bikeLand", preview: !effectivePro })}
                     />
 
                     <DashboardRangerCard
@@ -2539,6 +2581,25 @@ export default function CasterCycleApp() {
                       finished={hud.phase === "finished"}
                       onConnect={connectWallet}
                     />
+                    <TokenGaragePanel
+                      enabled={isConnected}
+                      address={address}
+                      onHolderChange={setTokenHolder}
+                      onConnect={connectWallet}
+                      onOpen={openExternal}
+                      onSelectTokenSkin={() => {
+                        setSelectedSkin("token");
+                        haptic("success");
+                        setToast("Token Rider equipped");
+                      }}
+                    />
+                    <TokenTrophyPanel
+                      enabled={isConnected}
+                      address={address}
+                      userFid={user?.fid ?? 0}
+                      dateKey={game.dateKey}
+                      onConnect={connectWallet}
+                    />
                     <UpgradePanel
                       enabled={isConnected}
                       isPro={effectivePro}
@@ -2551,6 +2612,7 @@ export default function CasterCycleApp() {
                       onVoiceInfo={() => playVoice("legal", {}, true)}
                     />
                     <PassHistoryPanel receipts={passReceipts} dayActive={dayActive} annualActive={annualActive} passUntil={passUntil} />
+                    <LegalDisclosurePanel onOpenTerms={() => openExternal(TERMS_URL)} />
                   </>
                 )}
 
@@ -2834,6 +2896,62 @@ function WelcomeBackPanel({
   );
 }
 
+function DashboardNav({ active, onSelect }: { active: DashboardTab; onSelect: (tab: DashboardTab) => void }) {
+  const primary = [
+    { id: "ride" as DashboardTab, label: "Play", sub: "Ride", icon: <Play size={17} /> },
+    { id: "garage" as DashboardTab, label: "Bike", sub: "Setup", icon: <Bike size={17} /> },
+    { id: "shop" as DashboardTab, label: "Pass", sub: "$1/$7", icon: <Wallet size={17} /> },
+  ];
+  const secondary = [
+    { id: "club" as DashboardTab, label: "Club", icon: <Users size={14} /> },
+    { id: "quest" as DashboardTab, label: "Quest", icon: <Sparkles size={14} /> },
+    { id: "leaders" as DashboardTab, label: "Rank", icon: <Trophy size={14} /> },
+  ];
+
+  return (
+    <nav className="mt-3 rounded-md border border-white/10 bg-[#02070c]/58 p-1.5 shadow-inner">
+      <div className="grid grid-cols-3 gap-1.5">
+        {primary.map((item) => {
+          const selected = active === item.id;
+          return (
+            <button
+              key={item.id}
+              className={`min-h-[54px] rounded-md border px-2 text-left transition active:scale-[0.98] ${
+                selected ? "border-[#fbe764]/70 bg-[#fbe764] text-[#071018] shadow-[0_12px_26px_rgba(251,231,100,0.18)]" : "border-white/8 bg-white/[0.05] text-white/72"
+              }`}
+              onClick={() => onSelect(item.id)}
+            >
+              <span className="flex items-center justify-between gap-2">
+                <span className={selected ? "text-[#071018]" : "text-[#7cf2ff]"}>{item.icon}</span>
+                {selected && <span className="h-1.5 w-1.5 rounded-full bg-[#071018]" />}
+              </span>
+              <span className="mt-1 block text-sm font-black leading-none">{item.label}</span>
+              <span className={`mt-0.5 block text-[9px] font-black uppercase tracking-[0.08em] ${selected ? "text-[#071018]/58" : "text-white/38"}`}>{item.sub}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+        {secondary.map((item) => {
+          const selected = active === item.id;
+          return (
+            <button
+              key={item.id}
+              className={`inline-flex min-h-9 items-center justify-center gap-1.5 rounded-md border px-2 text-[10px] font-black uppercase tracking-[0.06em] transition active:scale-[0.98] ${
+                selected ? "border-[#7cf2ff]/55 bg-[#7cf2ff]/18 text-white" : "border-white/8 bg-black/16 text-white/48"
+              }`}
+              onClick={() => onSelect(item.id)}
+            >
+              <span className={selected ? "text-[#7cf2ff]" : "text-white/42"}>{item.icon}</span>
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+}
+
 function WorldHub({
   phase,
   score,
@@ -2975,10 +3093,10 @@ function DashboardRangerCard({ onQuest, onDeal }: { onQuest: () => void; onDeal:
   );
 }
 
-function PremiumWorldTeaser({ proActive, onShop, onGarage }: { proActive: boolean; onShop: () => void; onGarage: () => void }) {
+function PremiumWorldTeaser({ proActive, onShop, onPreview }: { proActive: boolean; onShop: () => void; onPreview: () => void }) {
   return (
     <div className="mt-3 overflow-hidden rounded-md border border-[#ff7adf]/30 bg-[linear-gradient(135deg,rgba(255,122,223,0.16),rgba(124,242,255,0.10)_48%,rgba(251,231,100,0.10))]">
-      <button className="block w-full p-3 text-left active:scale-[0.99]" onClick={proActive ? onGarage : onShop}>
+      <button className="block w-full p-3 text-left active:scale-[0.99]" onClick={proActive ? onPreview : onShop}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#ff9ee6]">
@@ -3014,7 +3132,7 @@ function PremiumWorldTeaser({ proActive, onShop, onGarage }: { proActive: boolea
           <button className="min-h-9 rounded-md bg-[#fbe764] px-3 text-[10px] font-black uppercase text-[#071018] active:scale-[0.98]" onClick={onShop}>
             Unlock
           </button>
-          <button className="min-h-9 rounded-md border border-white/12 bg-white/8 px-3 text-[10px] font-black uppercase text-white/72 active:scale-[0.98]" onClick={onGarage}>
+          <button className="min-h-9 rounded-md border border-white/12 bg-white/8 px-3 text-[10px] font-black uppercase text-white/72 active:scale-[0.98]" onClick={onPreview}>
             Preview
           </button>
         </div>
@@ -3052,7 +3170,7 @@ function AreaPicker({
     {
       id: "bikeLand" as RideArea,
       label: "E-Bike Land",
-      meta: lifetimeActive ? "Lifetime" : proActive ? "Unlocked" : "$1 / $7",
+      meta: lifetimeActive ? "Lifetime" : proActive ? "Unlocked" : "10s preview",
       icon: proActive ? <Zap size={15} /> : <Lock size={15} />,
       locked: !proActive,
     },
@@ -3439,6 +3557,273 @@ function ResultStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+function TokenGaragePanel({
+  enabled,
+  address,
+  onHolderChange,
+  onConnect,
+  onOpen,
+  onSelectTokenSkin,
+}: {
+  enabled: boolean;
+  address?: `0x${string}`;
+  onHolderChange: (holder: boolean) => void;
+  onConnect: () => void;
+  onOpen: (url: string) => void;
+  onSelectTokenSkin: () => void;
+}) {
+  const chainId = useChainId();
+  const { switchChain } = useSwitchChain();
+  const tokenReady = ETH_ADDRESS_REGEX_CLIENT.test(EBIKE_TOKEN_ADDRESS);
+  const externalUrl = EBIKE_TOKEN_MARKET_URL || EBIKE_TOKEN_INFO_URL;
+  const { data: balance, isLoading } = useReadContract({
+    address: tokenReady ? EBIKE_TOKEN_ADDRESS : undefined,
+    abi: USDC_ABI,
+    functionName: "balanceOf",
+    args: address ? [address] : undefined,
+    chainId: BASE_CHAIN_ID,
+    query: { enabled: tokenReady && !!address },
+  });
+  const hasToken = typeof balance === "bigint" && balance > 0n;
+  const displayBalance = typeof balance === "bigint" ? formatUnits(balance, Number.isFinite(EBIKE_TOKEN_DECIMALS) ? EBIKE_TOKEN_DECIMALS : 18) : "0";
+
+  useEffect(() => {
+    onHolderChange(hasToken);
+  }, [hasToken, onHolderChange]);
+
+  const primaryAction = () => {
+    if (!enabled) {
+      onConnect();
+      return;
+    }
+    if (chainId !== BASE_CHAIN_ID) {
+      switchChain?.({ chainId: BASE_CHAIN_ID });
+      return;
+    }
+    if (hasToken) {
+      onSelectTokenSkin();
+      return;
+    }
+    if (externalUrl) onOpen(externalUrl);
+  };
+
+  return (
+    <div className="mt-3 rounded-md border border-[#35f6c8]/28 bg-[#35f6c8]/10 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#35f6c8]">
+            <Zap size={13} />
+            Token Garage
+          </div>
+          <div className="mt-1 text-lg font-black leading-tight text-white">{EBIKE_TOKEN_SYMBOL} holder perks</div>
+          <div className="mt-1 text-xs font-semibold leading-5 text-white/60">
+            Optional wallet-read cosmetics only. No buy prompt, custody, swap, staking, or price promise.
+          </div>
+        </div>
+        <div className={`shrink-0 rounded-md border px-2 py-1 text-right ${hasToken ? "border-[#a2ff9a]/45 bg-[#a2ff9a]/14" : "border-white/12 bg-white/8"}`}>
+          <div className={`text-[9px] font-black uppercase tracking-[0.1em] ${hasToken ? "text-[#a2ff9a]" : "text-white/42"}`}>{hasToken ? "holder" : "status"}</div>
+          <div className="text-sm font-black text-white">{tokenReady ? isLoading ? "..." : hasToken ? "Active" : "Read" : "Off"}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-1.5">
+        {[
+          ["Badge", "Profile flair"],
+          ["Decal", "Garage plate"],
+          ["Skin", "Token Rider"],
+        ].map(([title, detail]) => (
+          <div key={title} className="rounded-md border border-white/10 bg-black/16 px-2 py-2">
+            <div className="text-[10px] font-black text-white">{title}</div>
+            <div className="mt-0.5 truncate text-[8px] font-black uppercase tracking-[0.06em] text-white/42">{detail}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-2 flex items-center justify-between gap-2 rounded-md border border-white/10 bg-black/16 px-3 py-2">
+        <div className="min-w-0">
+          <div className="text-[9px] font-black uppercase tracking-[0.12em] text-white/42">wallet balance</div>
+          <div className="truncate text-sm font-black text-white">{tokenReady && enabled ? `${displayBalance} ${EBIKE_TOKEN_SYMBOL}` : tokenReady ? "Connect to read" : "Token not configured"}</div>
+        </div>
+        <button
+          className="inline-flex min-h-9 shrink-0 items-center justify-center gap-1 rounded-md bg-[#35f6c8] px-3 text-[10px] font-black uppercase text-[#071018] disabled:opacity-60"
+          disabled={!tokenReady || (enabled && !hasToken && !externalUrl)}
+          onClick={primaryAction}
+        >
+          {!tokenReady ? "Configure" : !enabled ? "Connect" : chainId !== BASE_CHAIN_ID ? "Base" : hasToken ? "Equip" : externalUrl ? "Open" : "Info"}
+          <ExternalLink size={12} />
+        </button>
+      </div>
+
+      <div className="mt-2 rounded-md border border-[#fbe764]/18 bg-[#fbe764]/8 px-3 py-2 text-[10px] font-semibold leading-4 text-white/58">
+        Not investment, legal, tax, or purchase advice. CasterCycle does not endorse buying tokens, sell tokens, custody assets, guarantee liquidity, or give tokens cash value.
+      </div>
+      {tokenReady && (
+        <button
+          className="mt-2 w-full truncate rounded-md border border-white/10 bg-white/7 px-3 py-2 text-left text-[9px] font-black uppercase tracking-[0.08em] text-white/42"
+          onClick={() => navigator.clipboard?.writeText(EBIKE_TOKEN_ADDRESS).catch(() => {})}
+        >
+          contract {EBIKE_TOKEN_ADDRESS}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function TokenTrophyPanel({
+  enabled,
+  address,
+  userFid,
+  dateKey,
+  onConnect,
+}: {
+  enabled: boolean;
+  address?: `0x${string}`;
+  userFid: number;
+  dateKey: string;
+  onConnect: () => void;
+}) {
+  const chainId = useChainId();
+  const { switchChain } = useSwitchChain();
+  const [status, setStatus] = useState("");
+  const [checking, setChecking] = useState<TokenTrophyPeriod | null>(null);
+  const vaultReady = !!TOKEN_TROPHY_VAULT && ETH_ADDRESS_REGEX_CLIENT.test(TOKEN_TROPHY_VAULT);
+  const dailyKey = yesterdayKey(dateKey);
+  const weeklyKey = daysBeforeKey(dateKey, 7);
+  const { data: poolBalance } = useReadContract({
+    address: ETH_ADDRESS_REGEX_CLIENT.test(EBIKE_TOKEN_ADDRESS) ? EBIKE_TOKEN_ADDRESS : undefined,
+    abi: USDC_ABI,
+    functionName: "balanceOf",
+    args: vaultReady && TOKEN_TROPHY_VAULT ? [TOKEN_TROPHY_VAULT] : undefined,
+    chainId: BASE_CHAIN_ID,
+    query: { enabled: vaultReady && ETH_ADDRESS_REGEX_CLIENT.test(EBIKE_TOKEN_ADDRESS) },
+  });
+  const { writeContract, data: trophyHash, isPending: walletOpen } = useWriteContract();
+  const { isLoading: confirming, isSuccess: claimed } = useWaitForTransactionReceipt({ hash: trophyHash });
+  const busy = !!checking || walletOpen || confirming;
+  const poolLabel = typeof poolBalance === "bigint" ? `${formatUnits(poolBalance, Number.isFinite(EBIKE_TOKEN_DECIMALS) ? EBIKE_TOKEN_DECIMALS : 18)} ${EBIKE_TOKEN_SYMBOL}` : "Not funded";
+
+  useEffect(() => {
+    if (!claimed) return;
+    setStatus("Token trophy claimed");
+  }, [claimed]);
+
+  const requestTrophy = async (period: TokenTrophyPeriod) => {
+    if (!enabled) {
+      onConnect();
+      return;
+    }
+    if (chainId !== BASE_CHAIN_ID) {
+      switchChain?.({ chainId: BASE_CHAIN_ID });
+      return;
+    }
+    if (!vaultReady || !TOKEN_TROPHY_VAULT) {
+      setStatus("Deploy trophy vault to enable");
+      return;
+    }
+    if (!userFid) {
+      setStatus("Open in Farcaster to check trophies");
+      return;
+    }
+    if (!address) {
+      setStatus("Connect wallet to claim");
+      return;
+    }
+
+    setChecking(period);
+    setStatus(period === "weekly" ? "Checking closed weekly board" : "Checking yesterday's board");
+    try {
+      const res = await sdk.quickAuth.fetch("/api/token-trophy-claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dateKey: period === "weekly" ? weeklyKey : dailyKey, period, address }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.claim) {
+        setStatus(data.error || "No trophy ready");
+        return;
+      }
+
+      const claim = data.claim as TokenTrophyClaimPayload;
+      writeContract({
+        address: TOKEN_TROPHY_VAULT,
+        abi: TOKEN_TROPHY_ABI,
+        functionName: "claim",
+        args: [
+          claim.to,
+          BigInt(claim.fid),
+          claim.periodKey,
+          BigInt(claim.score),
+          BigInt(claim.amount),
+          claim.claimId,
+          BigInt(claim.deadline),
+          claim.signature,
+        ],
+      });
+      setStatus(`${claim.label}: ${formatUnits(BigInt(claim.amount), Number.isFinite(EBIKE_TOKEN_DECIMALS) ? EBIKE_TOKEN_DECIMALS : 18)} ${EBIKE_TOKEN_SYMBOL}`);
+    } catch {
+      setStatus("Trophy check failed");
+    } finally {
+      setChecking(null);
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded-md border border-[#fbe764]/30 bg-[#fbe764]/10 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#fbe764]">
+            <Trophy size={13} />
+            Token Trophies
+          </div>
+          <div className="mt-1 text-lg font-black leading-tight text-white">Closed-board winners</div>
+          <div className="mt-1 text-xs font-semibold leading-5 text-white/60">
+            Optional owner-funded trophies for verified Daily Dash winners. No purchase needed, no random draw, void where prohibited.
+          </div>
+        </div>
+        <div className={`shrink-0 rounded-md border px-2 py-1 text-right ${vaultReady ? "border-[#fbe764]/45 bg-[#fbe764]/14" : "border-white/12 bg-white/8"}`}>
+          <div className="text-[9px] font-black uppercase tracking-[0.1em] text-white/42">vault</div>
+          <div className="text-sm font-black text-white">{vaultReady ? "Ready" : "Setup"}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button
+          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-[#fbe764] px-3 text-xs font-black text-[#111923] disabled:opacity-55"
+          disabled={busy || !vaultReady}
+          onClick={() => requestTrophy("daily")}
+        >
+          <Trophy size={14} />
+          {checking === "daily" || confirming ? "Checking" : "Daily"}
+        </button>
+        <button
+          className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-[#fbe764]/45 bg-[#fbe764]/12 px-3 text-xs font-black text-white disabled:opacity-55"
+          disabled={busy || !vaultReady}
+          onClick={() => requestTrophy("weekly")}
+        >
+          <Crown size={14} />
+          {checking === "weekly" ? "Checking" : "Weekly"}
+        </button>
+      </div>
+
+      <div className="mt-2 grid grid-cols-2 gap-2 text-[10px] font-black uppercase tracking-[0.08em]">
+        <div className="rounded-md border border-white/10 bg-black/16 px-2 py-2 text-white/55">
+          Pool <span className="block truncate text-xs normal-case tracking-normal text-white">{poolLabel}</span>
+        </div>
+        <div className="rounded-md border border-white/10 bg-black/16 px-2 py-2 text-white/55">
+          Rule <span className="block truncate text-xs normal-case tracking-normal text-white">Skill board only</span>
+        </div>
+      </div>
+
+      <div className="mt-2 min-h-4 text-[10px] font-bold uppercase tracking-[0.08em] text-white/50">
+        {status || (vaultReady ? "Checks closed leaderboards only." : "Deploy and fund a vault to enable.")}
+      </div>
+      <div className="mt-2 rounded-md border border-white/10 bg-black/14 px-3 py-2 text-[10px] font-semibold leading-4 text-white/54">
+        Fun gameplay trophies only. CasterCycle can pause or correct claims for abuse, errors, or compliance. No market value, resale, tax, or eligibility promise.
+      </div>
+    </div>
+  );
+}
+
 function SkinPicker({
   skins,
   selected,
@@ -3803,9 +4188,9 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
         onClick={() => onOpen(KINGBULL_SOVRN_URL)}
       >
         <span className="shrink-0 border-r border-[#fbe764]/25 px-3 text-[10px] font-black uppercase tracking-[0.12em] text-[#fbe764]">ad</span>
-        <span className="relative flex-1 overflow-hidden py-2">
-          <span className="block animate-[marquee_12s_linear_infinite] whitespace-nowrap text-xs font-black uppercase tracking-[0.08em] text-white">
-            Kingbull Ranger deal - $799 sale - try {KINGBULL_COUPON_CODE} for $50 off - tap to buy
+          <span className="relative flex-1 overflow-hidden py-2">
+            <span className="block animate-[marquee_12s_linear_infinite] whitespace-nowrap text-xs font-black uppercase tracking-[0.08em] text-white">
+            Kingbull Ranger fan link - verify price and fit - try {KINGBULL_COUPON_CODE} for $50 off if eligible
           </span>
         </span>
       </button>
@@ -3819,7 +4204,7 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
             </div>
             <div className="mt-1 text-xl font-black leading-tight text-white">Kingbull Ranger Fan Garage</div>
             <div className="mt-1 text-xs font-semibold leading-5 text-white/62">
-              A CasterCycle fan info page for a vintage/moped-style e-bike. Not affiliated with or endorsed by Kingbull.
+              Unaffiliated fan info. Not endorsed by Kingbull; verify specs, laws, price, fit, and support before buying.
             </div>
           </div>
           <div className="shrink-0 rounded-md border border-[#7cf2ff]/28 bg-[#7cf2ff]/10 px-2 py-1 text-right">
@@ -3859,7 +4244,7 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
               Ranger deal
             </div>
             <div className="mt-1 text-2xl font-black leading-none text-white">$799 sale</div>
-            <div className="mt-1 text-xs font-semibold leading-5 text-white/62">Use coupon for another $50 off when eligible.</div>
+            <div className="mt-1 text-xs font-semibold leading-5 text-white/62">Fan-reported deal. Verify final checkout price, tax, shipping, warranty, and coupon eligibility.</div>
           </div>
           <div className="shrink-0 rounded-md border border-[#a2ff9a]/35 bg-[#a2ff9a]/12 px-3 py-2 text-center">
             <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#a2ff9a]">code</div>
@@ -3890,7 +4275,7 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
             </div>
             <div className="mt-1 text-lg font-black leading-tight text-white">Kingbull Discover ST 2.0</div>
             <div className="mt-1 text-xs font-semibold leading-5 text-white/62">
-              Premium off-road/city e-bike option to compare with the Ranger.
+              Premium off-road/city e-bike option to compare. Affiliate link; not a recommendation to buy.
             </div>
           </div>
           <div className="shrink-0 rounded-md border border-white/12 bg-white/8 px-2 py-1 text-right">
@@ -4123,10 +4508,10 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
       <div className="mt-3 rounded-md border border-[#ff5d73]/24 bg-[#ff5d73]/10 p-3">
         <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#ff9aac]">
           <ShieldCheck size={13} />
-          fan page note
+          fan page terms
         </div>
         <div className="mt-1 text-[11px] font-semibold leading-4 text-white/60">
-          Specs, prices, promotions, laws, and availability can change. Promo links may be affiliate links. Verify with Kingbull and your local e-bike rules before buying or riding. This is not legal, safety, or purchase advice.
+          CasterCycle is not affiliated with, sponsored by, or endorsed by Kingbull. Specs, prices, promotions, laws, and availability can change. Promo buttons may be affiliate links that compensate us. Verify with Kingbull, inspect the bike, wear proper safety gear, and follow local e-bike rules. No legal, safety, purchase, warranty, or fitness-for-use advice.
         </div>
       </div>
     </div>
@@ -4166,6 +4551,81 @@ function VideoPreviewButton({
         <span className="mt-0.5 block truncate text-[10px] font-bold uppercase tracking-[0.08em] text-white/58">{subtitle}</span>
       </span>
     </button>
+  );
+}
+
+function PassCompareGrid({
+  plan,
+  dayActive,
+  annualActive,
+  onPlan,
+}: {
+  plan: PassPlan;
+  dayActive: boolean;
+  annualActive: boolean;
+  onPlan: (plan: PassPlan) => void;
+}) {
+  const cards = [
+    {
+      id: "free",
+      title: "Free",
+      price: "$0",
+      detail: "30s preview",
+      perks: ["Community", "State Park", "Dash"],
+      active: false,
+      select: undefined,
+    },
+    {
+      id: "day",
+      title: "Day",
+      price: "$1",
+      detail: dayActive ? "Active" : "Today",
+      perks: ["Unlimited", "E-Bike Land", "Glow Track"],
+      active: plan === "day",
+      select: "day" as PassPlan,
+    },
+    {
+      id: "life",
+      title: "Lifetime",
+      price: "$7",
+      detail: annualActive ? "Active" : "Best value",
+      perks: ["All worlds", "Lounge", "Future drops"],
+      active: plan === "lifetime",
+      select: "lifetime" as PassPlan,
+    },
+  ];
+
+  return (
+    <div className="mt-3">
+      <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-white/46">
+        <ShieldCheck size={13} />
+        compare pass
+      </div>
+      <div className="grid grid-cols-3 gap-1.5">
+        {cards.map((card) => (
+          <button
+            key={card.id}
+            className={`min-h-[118px] rounded-md border px-2 py-2 text-left transition active:scale-[0.98] ${
+              card.active ? "border-[#fbe764]/80 bg-[#fbe764]/16" : "border-white/10 bg-black/16"
+            } ${!card.select ? "opacity-78" : ""}`}
+            onClick={() => {
+              if (card.select) onPlan(card.select);
+            }}
+          >
+            <span className="block text-[9px] font-black uppercase tracking-[0.1em] text-white/42">{card.title}</span>
+            <span className="mt-1 block text-lg font-black leading-none text-white">{card.price}</span>
+            <span className="mt-1 block truncate text-[9px] font-black uppercase tracking-[0.06em] text-[#fbe764]">{card.detail}</span>
+            <span className="mt-2 block space-y-1">
+              {card.perks.map((perk) => (
+                <span key={perk} className="block truncate text-[9px] font-bold text-white/58">
+                  {perk}
+                </span>
+              ))}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -4278,7 +4738,7 @@ function UpgradePanel({
           </div>
           <div className="mt-1 text-xl font-black leading-tight text-white">{urgent ? "Keep the ride going" : "Unlimited park riding"}</div>
           <div className="mt-1 text-xs font-semibold leading-4 text-white/64">
-            {urgent ? "Your free session ended. A day pass resumes unlimited Freestyle today." : "30 seconds free. Pass unlocks Freestyle, E-Bike Land, Carbon Pro, and the lounge."}
+            {urgent ? "Your free session ended. A day pass resumes unlimited Freestyle today." : "30 seconds free. Pass unlocks Freestyle, E-Bike Land, Glow Track, and the lounge."}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -4292,19 +4752,7 @@ function UpgradePanel({
           {isPro && <div className="rounded bg-[#a2ff9a] px-2 py-1 text-[10px] font-black text-[#111923]">ACTIVE</div>}
         </div>
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        {[
-          ["Unlimited time", "No 30s stop"],
-          ["E-Bike Land", "Premium world"],
-          ["Carbon + Neon", "Better handling"],
-          ["Club lounge", "Paid riders"],
-        ].map(([title, detail]) => (
-          <div key={title} className="rounded-md border border-white/10 bg-black/16 px-2 py-2">
-            <div className="text-[10px] font-black text-white">{title}</div>
-            <div className="mt-0.5 text-[9px] font-bold uppercase tracking-[0.06em] text-white/42">{detail}</div>
-          </div>
-        ))}
-      </div>
+      <PassCompareGrid plan={plan} dayActive={dayActive} annualActive={annualActive} onPlan={setPlan} />
       <div className="mt-3 rounded-md border border-[#ff7adf]/28 bg-[#ff7adf]/10 p-3">
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
@@ -4328,26 +4776,6 @@ function UpgradePanel({
             </div>
           ))}
         </div>
-      </div>
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <button
-          className={`rounded-md border px-3 py-3 text-left transition active:scale-[0.98] ${plan === "day" ? "bg-[#fbe764]/18" : "bg-black/16"}`}
-          style={{ borderColor: plan === "day" ? "#fbe764" : "rgba(255,255,255,0.14)" }}
-          onClick={() => setPlan("day")}
-        >
-          <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-[#fbe764]">day pass</span>
-          <span className="mt-1 block text-base font-black text-white">$1</span>
-          <span className="mt-1 block text-[10px] font-bold text-white/52">Unlimited today</span>
-        </button>
-        <button
-          className={`rounded-md border px-3 py-3 text-left transition active:scale-[0.98] ${plan === "lifetime" ? "bg-[#fbe764]/18" : "bg-black/16"}`}
-          style={{ borderColor: plan === "lifetime" ? "#fbe764" : "rgba(255,255,255,0.14)" }}
-          onClick={() => setPlan("lifetime")}
-        >
-          <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-[#fbe764]">lifetime</span>
-          <span className="mt-1 block text-base font-black text-white">$7</span>
-          <span className="mt-1 block text-[10px] font-bold text-white/52">All worlds</span>
-        </button>
       </div>
       <button
         className="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-md bg-[#fbe764] px-3 text-sm font-black text-[#071018] shadow-[0_14px_28px_rgba(251,231,100,0.18)] disabled:opacity-60"
@@ -4450,6 +4878,44 @@ function PassHistoryPanel({
   );
 }
 
+function LegalDisclosurePanel({ onOpenTerms }: { onOpenTerms: () => void }) {
+  return (
+    <div className="mt-3 rounded-md border border-[#ff5d73]/24 bg-[#ff5d73]/10 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#ff9aac]">
+            <ShieldCheck size={13} />
+            terms snapshot
+          </div>
+          <div className="mt-1 text-sm font-black text-white">Ride for fun. You stay in control.</div>
+        </div>
+        <button
+          className="shrink-0 rounded-md border border-white/12 bg-white/8 px-2 py-1 text-[9px] font-black uppercase text-white/64"
+          onClick={onOpenTerms}
+        >
+          Full terms
+        </button>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-1.5">
+        {[
+          ["No advice", "No financial, tax, legal, safety, or purchase advice."],
+          ["No promise", "No token value, profit, liquidity, payout, or availability promise."],
+          ["Your wallet", "You approve transactions, pay gas, manage taxes, and follow local rules."],
+          ["As-is play", "Game, scores, rewards, links, and content are provided as-is."],
+        ].map(([title, detail]) => (
+          <div key={title} className="rounded-md border border-white/10 bg-black/16 px-2 py-2">
+            <div className="text-[9px] font-black uppercase tracking-[0.08em] text-white/46">{title}</div>
+            <div className="mt-0.5 text-[10px] font-semibold leading-4 text-white/58">{detail}</div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 text-[10px] font-semibold leading-4 text-white/52">
+        Token trophies are optional, owner-funded, skill-based, no-purchase-needed, and may be paused or corrected for abuse, errors, or legal/compliance reasons.
+      </div>
+    </div>
+  );
+}
+
 function lanePoint(width: number, height: number, lane: number, progress: number) {
   const horizon = height * 0.25;
   const bottom = height - 108;
@@ -4458,7 +4924,7 @@ function lanePoint(width: number, height: number, lane: number, progress: number
   return { x: width / 2 + lane * spread, y, scale: 0.25 + progress * 1.18 };
 }
 
-function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height: number, free: FreeRideModel, skin: Skin, unlimited: boolean, now: number) {
+function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height: number, free: FreeRideModel, skin: Skin, unlimited: boolean, now: number, preview = false) {
   ctx.save();
   const nextSpot = nextFreeRideSpot(free);
   const sky = ctx.createLinearGradient(0, 0, 0, height);
@@ -4489,7 +4955,7 @@ function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height:
   ctx.font = "900 10px system-ui, sans-serif";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  ctx.fillText(unlimited ? (free.area === "statePark" ? "STATE PARK UNLIMITED" : "UNLIMITED FREESTYLE") : `${Math.ceil(free.remaining)}S FREE RIDE`, 30, height * 0.13 + 19);
+  ctx.fillText(preview ? `${Math.ceil(free.remaining)}S E-BIKE LAND PREVIEW` : unlimited ? (free.area === "statePark" ? "STATE PARK UNLIMITED" : "UNLIMITED FREESTYLE") : `${Math.ceil(free.remaining)}S FREE RIDE`, 30, height * 0.13 + 19);
   ctx.fillStyle = "#ffffff";
   ctx.font = "900 16px system-ui, sans-serif";
   ctx.fillText(`${free.zone} - ${free.terrain}`, 30, height * 0.13 + 39);

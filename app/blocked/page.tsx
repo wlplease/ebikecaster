@@ -53,7 +53,7 @@ export default function BlockedPage() {
           CasterCycle is not available in {country} due to sanctions or regional compliance restrictions.
         </p>
         <p style={{ fontSize: 11, color: "rgba(255,255,255,0.42)" }}>
-          This app does not offer cash prizes, withdrawals, gambling, custody, or token rewards.
+          This app does not offer gambling, custody, withdrawals, token sales, purchase-required prizes, or cash-value rewards.
         </p>
       </div>
     </div>
