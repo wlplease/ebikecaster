@@ -16,7 +16,7 @@ export function GET() {
       splashBackgroundColor: "#101b26",
       subtitle: "Freestyle park rides",
       description:
-        "Ride Freestyle Park free for 30 seconds, unlock unlimited play, explore E-Bike Land, customize bikes, and share scores.",
+        "Ride Freestyle Park free for 30 seconds, unlock premium worlds, customize bikes, and share scores.",
       screenshotUrls: [
         appUrl("/media/castercycle-screenshot-ready.png"),
         appUrl("/media/castercycle-screenshot-ride.png"),
@@ -31,7 +31,7 @@ export function GET() {
       tagline: "Park e-bike dash.",
       ogTitle: "CasterCycle",
       ogDescription:
-        "Free 30-second park rides, unlimited Cycle Pass play, E-Bike Land, and Farcaster challenges.",
+        "Free 30-second park rides, Cycle Pass worlds, bike skins, and Farcaster challenges.",
       ogImageUrl: appUrl("/media/castercycle-hero.png"),
       castShareUrl: appUrl("/"),
     },

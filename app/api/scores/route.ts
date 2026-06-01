@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 const ETH_ADDRESS_REGEX = /^0x[0-9a-f]{40}$/i;
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
-const ROUTE_NAMES = ["Community Park", "State Park", "E-Bike Land", "Freestyle Park"];
+const ROUTE_NAMES = ["Community Park", "State Park", "E-Bike Land", "Skyline Circuit", "Freestyle Park"];
 const SCORE_MODES = ["dash", "freestyle"] as const;
 
 const scoreSchema = z.object({
