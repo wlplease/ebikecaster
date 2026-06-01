@@ -1,7 +1,7 @@
 {
   "name": "CasterCycle",
   "short_name": "CasterCycle",
-  "description": "A Farcaster e-bike park game with free roam, daily dash scores, and Base unlocks.",
+  "description": "A Farcaster e-bike park game with free roam, daily dash scores, and simple wallet passes.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#101b26",

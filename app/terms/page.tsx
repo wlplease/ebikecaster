@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-const UPDATED = "May 31, 2026";
+const UPDATED = "June 1, 2026";
 
 const sections = [
   {
@@ -11,22 +11,17 @@ const sections = [
   {
     title: "No Advice",
     body:
-      "Nothing in CasterCycle is financial, investment, legal, tax, safety, medical, warranty, or purchase advice. Do your own research and talk to qualified professionals before making decisions about tokens, wallets, taxes, e-bikes, riding, purchases, or local laws.",
+      "Nothing in CasterCycle is financial, investment, legal, tax, safety, medical, warranty, or purchase advice. Do your own research and talk to qualified professionals before making decisions about wallets, taxes, e-bikes, riding, purchases, or local laws.",
   },
   {
     title: "Wallets And Payments",
     body:
-      "You control your wallet and approve your own transactions. Base network gas, failed transactions, wallet mistakes, tax reporting, local compliance, and loss of access are your responsibility. CasterCycle does not custody user funds or guarantee refunds, confirmations, uptime, token value, liquidity, or third-party wallet behavior.",
+      "You control your wallet and approve your own transactions. Network gas, failed transactions, wallet mistakes, tax reporting, local compliance, and loss of access are your responsibility. CasterCycle does not custody user funds or guarantee refunds, confirmations, uptime, resale value, rewards, or third-party wallet behavior.",
   },
   {
-    title: "Tokens And Trophies",
+    title: "Game Passes",
     body:
-      "CYCLE credits are non-transferable gameplay credits with no cash value. Optional token trophies, if enabled, are owner-funded, skill-based, no-purchase-needed gameplay trophies for closed verified leaderboards. Trophies are not guaranteed, not random, not wages, not yield, not staking, not an investment, and not a promise of resale value, market value, tax treatment, or future eligibility. CasterCycle may pause, deny, correct, or revoke claims for abuse, errors, fraud, security, or legal/compliance reasons. Void where prohibited.",
-  },
-  {
-    title: "Airdrop Access Token",
-    body:
-      "The in-game access token is intended as a free follower airdrop and gameplay access signal only. Do not buy it. If you do not have tokens, use the free game modes or ask a friend/community member for a free play drop if extras are available. CasterCycle reads wallet balance without burning or spending the token: 100,000 tokens may unlock one extended daily round, and 1,000,000 tokens may unlock day-pass-style play while held. This is not a sale, buy recommendation, security, investment, reward promise, loyalty program, sweepstakes, wage, or cash-value program. There is no promised price, liquidity, redemption, payout, tax treatment, or future benefit. Thresholds and access rules may change or be disabled for abuse, errors, security, or compliance.",
+      "Optional paid passes unlock extra play time, cosmetics, maps, and social areas inside CasterCycle. They are entertainment access only, not an investment, prize, reward program, security, sweepstakes, wage, yield, staking, or financial product. Pass access may be paused, corrected, changed, or revoked for abuse, fraud, errors, security, or legal/compliance reasons.",
   },
   {
     title: "Kingbull Fan Content",
@@ -41,7 +36,7 @@ const sections = [
   {
     title: "No Endorsement",
     body:
-      "Links, videos, products, tokens, wallets, chains, users, posts, casts, scores, or third-party content shown in the app are not endorsements or guarantees. Third-party services have their own terms, risks, privacy practices, and availability.",
+      "Links, videos, products, wallets, chains, users, posts, casts, scores, or third-party content shown in the app are not endorsements or guarantees. Third-party services have their own terms, risks, privacy practices, and availability.",
   },
   {
     title: "Limits",
@@ -61,7 +56,7 @@ export default function TermsPage() {
           <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#fbe764]">terms and disclaimer</div>
           <h1 className="mt-2 text-3xl font-black tracking-normal text-white">CasterCycle Terms</h1>
           <p className="mt-2 text-sm font-semibold leading-6 text-white/62">
-            Updated {UPDATED}. Short version: play hard, share scores, keep control of your wallet, verify products and laws yourself, do not buy the game token, and do not treat the app as advice or a guarantee.
+            Updated {UPDATED}. Short version: play hard, share scores, keep control of your wallet, verify products and laws yourself, and do not treat the app as advice or a guarantee.
           </p>
         </div>
 
@@ -75,7 +70,7 @@ export default function TermsPage() {
         </div>
 
         <div className="mt-4 rounded-md border border-[#7cf2ff]/20 bg-[#7cf2ff]/8 p-4 text-sm font-semibold leading-6 text-white/58">
-          These terms are a practical product disclaimer, not a substitute for attorney-drafted terms. If you launch paid passes, affiliate promos, or token trophies publicly, have counsel review the final flow and published rules.
+          These terms are a practical product disclaimer, not a substitute for attorney-drafted terms. If you launch paid passes or affiliate promos publicly, have counsel review the final flow and published rules.
         </div>
       </div>
     </main>

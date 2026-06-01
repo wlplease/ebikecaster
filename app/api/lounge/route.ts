@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@farcaster/quick-auth";
 import { z } from "zod";
 import { addDoc, firebaseRestConfigured, queryDocs } from "@/lib/firebase-rest";
+import { fetchNeynarProfiles } from "@/lib/neynar";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -58,7 +59,7 @@ async function readRows() {
     orderField: "createdAtMs",
     limit: 30,
   });
-  return snap.map((doc) => {
+  const rows = snap.map((doc) => {
     const data = doc.data;
     return {
       id: doc.id,
@@ -68,6 +69,18 @@ async function readRows() {
       pfpUrl: String(data.pfpUrl || ""),
       text: String(data.text || ""),
       createdAt: Number(data.createdAtMs || 0),
+    };
+  });
+  const profiles = await fetchNeynarProfiles(rows.map((row) => row.fid));
+  if (profiles.size === 0) return rows;
+  return rows.map((row) => {
+    const profile = profiles.get(row.fid);
+    if (!profile) return row;
+    return {
+      ...row,
+      username: profile.username || row.username,
+      displayName: profile.displayName || row.displayName,
+      pfpUrl: profile.pfpUrl || row.pfpUrl,
     };
   });
 }
@@ -97,11 +110,12 @@ export async function POST(request: NextRequest) {
 
   try {
     if (!firebaseRestConfigured()) return json({ ok: false, rows: [], configured: false }, 202);
+    const profile = (await fetchNeynarProfiles([fid], fid)).get(fid);
     await addDoc("castercycle-lounge-messages", {
       fid,
-      username: parsed.data.username,
-      displayName: parsed.data.displayName,
-      pfpUrl: parsed.data.pfpUrl,
+      username: profile?.username || parsed.data.username,
+      displayName: profile?.displayName || parsed.data.displayName,
+      pfpUrl: profile?.pfpUrl || parsed.data.pfpUrl,
       text,
       createdAtMs: Date.now(),
     });

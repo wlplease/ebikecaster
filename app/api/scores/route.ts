@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@farcaster/quick-auth";
 import { z } from "zod";
 import { firebaseRestConfigured, getDoc, queryDocs, setDoc } from "@/lib/firebase-rest";
+import { fetchNeynarProfiles } from "@/lib/neynar";
 import { rateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
@@ -132,6 +133,21 @@ async function followingFids(fid: number) {
   return fids;
 }
 
+async function enrichProfiles<T extends { fid: number; username: string; displayName: string; pfpUrl: string }>(rows: T[], viewerFid = 0) {
+  const profiles = await fetchNeynarProfiles(rows.map((row) => row.fid), viewerFid);
+  if (profiles.size === 0) return rows;
+  return rows.map((row) => {
+    const profile = profiles.get(row.fid);
+    if (!profile) return row;
+    return {
+      ...row,
+      username: profile.username || row.username,
+      displayName: profile.displayName || row.displayName,
+      pfpUrl: profile.pfpUrl || row.pfpUrl,
+    };
+  });
+}
+
 export async function GET(request: NextRequest) {
   const dateKey = request.nextUrl.searchParams.get("dateKey") || "";
   const scope = request.nextUrl.searchParams.get("scope") === "friends" ? "friends" : "global";
@@ -181,6 +197,8 @@ export async function GET(request: NextRequest) {
       const fids = await followingFids(fid);
       rows = fids ? rows.filter((row) => fids.has(row.fid)).slice(0, resultLimit) : rows.slice(0, resultLimit);
     }
+
+    rows = await enrichProfiles(rows, fid);
 
     if (compact) {
       return json({ ok: true, rows, scope, period, weekKey, compact: true, friendsResolved: scope === "friends" && !!process.env.NEYNAR_API_KEY });
@@ -243,11 +261,12 @@ export async function POST(request: NextRequest) {
     const previousScore = Number(existing?.data?.score || 0);
     const previousWeeklyScore = Number(existingWeekly?.data?.score || 0);
     const now = Date.now();
+    const neynarProfile = (await fetchNeynarProfiles([fid], fid)).get(fid);
     const profile = {
       fid,
-      username: payload.username,
-      displayName: payload.displayName,
-      pfpUrl: payload.pfpUrl,
+      username: neynarProfile?.username || payload.username,
+      displayName: neynarProfile?.displayName || payload.displayName,
+      pfpUrl: neynarProfile?.pfpUrl || payload.pfpUrl,
       address,
       verified: !!verifiedFid,
     };

@@ -72,6 +72,151 @@
   }
 }
 
+@layer components {
+  .cc-bottom-sheet {
+    max-height: min(78dvh, 660px) !important;
+  }
+}
+
+@media (max-width: 380px), (max-height: 740px) {
+  .cc-top-hud-wrap {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    padding-top: 0.5rem;
+  }
+
+  .cc-topbar {
+    padding: 0.4rem;
+  }
+
+  .cc-brand-icon {
+    width: 28px;
+    height: 28px;
+  }
+
+  .cc-brand-title {
+    font-size: 10px;
+    letter-spacing: 0.08em;
+  }
+
+  .cc-brand-subtitle {
+    max-width: 8.75rem;
+    font-size: 9px;
+  }
+
+  .cc-hud-pill {
+    min-width: 42px;
+    padding: 0.28rem 0.38rem;
+    font-size: 10px;
+  }
+
+  .cc-audio-button {
+    width: 30px;
+    height: 30px;
+  }
+
+  .cc-bottom-sheet {
+    max-height: min(74dvh, 600px) !important;
+    padding: 0.75rem;
+  }
+
+  .cc-dashboard-header {
+    padding: 0.65rem;
+  }
+
+  .cc-dashboard-title,
+  .cc-intro-title {
+    font-size: 1.35rem;
+  }
+
+  .cc-dashboard-detail,
+  .cc-intro-copy {
+    font-size: 0.75rem;
+    line-height: 1.05rem;
+  }
+
+  .cc-dashboard-image,
+  .cc-intro-image {
+    width: 44px;
+    height: 44px;
+  }
+
+  .cc-dashboard-stats {
+    margin-top: 0.5rem;
+  }
+
+  .cc-dashboard-nav {
+    margin-top: 0.5rem;
+    padding: 0.25rem;
+  }
+
+  .cc-nav-button {
+    min-height: 42px;
+    gap: 0.1rem;
+  }
+
+  .cc-nav-label {
+    font-size: 8px;
+    letter-spacing: 0;
+  }
+
+  .cc-world-hub,
+  .cc-intro-slides,
+  .cc-primary-actions {
+    margin-top: 0.65rem;
+  }
+
+  .cc-today-card,
+  .cc-ride-card {
+    padding: 0.65rem;
+  }
+
+  .cc-ride-card {
+    min-height: 94px;
+  }
+
+  .cc-ride-title {
+    margin-top: 0.55rem;
+  }
+
+  .cc-score-strip,
+  .cc-access-row {
+    margin-top: 0.45rem;
+  }
+
+  .cc-share-button,
+  .cc-primary-actions button {
+    min-height: 42px;
+  }
+
+  .cc-intro-slide {
+    min-height: 78px;
+  }
+}
+
+@media (max-height: 700px) {
+  .cc-bottom-sheet {
+    max-height: 70dvh !important;
+  }
+
+  .cc-dashboard-stats,
+  .cc-compact-detail {
+    display: none;
+  }
+
+  .cc-ride-card {
+    min-height: 76px;
+  }
+
+  .cc-intro-slide {
+    min-height: 64px;
+  }
+
+  .cc-intro-slide span:last-child {
+    display: none;
+  }
+}
+
 @keyframes marquee {
   from {
     transform: translateX(100%);

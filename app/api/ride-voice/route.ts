@@ -66,7 +66,7 @@ function voiceLine(line: LineId, request: NextRequest) {
   if (line === "boost") return "Boost chain. Keep it clean.";
   if (line === "mission") return `${mission} cleared. Nice ride.`;
   if (line === "finish") return "Ride complete. Share the score and make the feed chase you.";
-  if (line === "legal") return "CasterCycle is for entertainment. The airdrop token is free game access only. Do not buy it. Ask a friend or the community for a free play drop if needed. No token, credit, trophy, pass, or link is investment, legal, tax, safety, or purchase advice, and none has promised cash value.";
+  if (line === "legal") return "CasterCycle is for entertainment. Optional passes unlock play time only. No pass, wallet action, affiliate link, score, or social feature is investment, legal, tax, safety, or purchase advice, and no reward or payout is promised.";
   if (line === "lowBattery") return "Low charge. Collect bolts or keep the line clean.";
   if (line === "checkpoint") return "Halfway marker. Hold the flow and bring it home.";
   if (line === "combo") return "Ten flow. You are locked into the lane.";
@@ -76,7 +76,7 @@ function voiceLine(line: LineId, request: NextRequest) {
   if (line === "parkZone") return `${route} discovered. New park line opened.`;
   if (line === "parkBoost") return `${route} boost. Chain the next landmark.`;
   if (line === "paywall") return "Free ride complete. A one dollar day pass keeps Freestyle open today, or lifetime unlock is seven dollars.";
-  return "Credits ready. Claim your verified ride rewards on Base.";
+  return "Ride ready. Share your score with friends.";
 }
 
 export async function GET(request: NextRequest) {
