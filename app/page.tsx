@@ -11,6 +11,7 @@ import {
   Crown,
   Flame,
   Gauge,
+  HelpCircle,
   Home,
   Lock,
   Map,
@@ -58,7 +59,17 @@ const FREE_ROAM_SECONDS = 30;
 const KINGBULL_RANGER_URL = "https://sovrn.co/1f76den";
 const KINGBULL_COUPON_CODE = process.env.NEXT_PUBLIC_KINGBULL_COUPON_CODE || "GET50OFF";
 const KINGBULL_REDDIT_SEARCH_URL = "https://www.reddit.com/r/ebikes/search/?q=kingbull%20ranger&restrict_sr=1";
+const AVENTON_EBIKES_URL = "https://www.aventon.com/collections/ebikes/__ebike_sale";
+const AVENTON_SALE_URL = "https://www.aventon.com/collections/sale";
+const AVENTON_COMPARE_URL = "https://www.aventon.com/collections";
+const LECTRIC_URL = "https://lectricebikes.com/";
+const LECTRIC_XP4_URL = "https://lectricebikes.com/collections/xp4-ebikes";
+const TST_REFERRAL_URL = "https://tstebike.com/isayisqg";
+const TST_DISCOUNT_URL = "https://tstebike.com/collections/ebikes-can-use-discount";
+const TST_COMPARE_URL = "https://tstebike.com/pages/compare-models";
+const TST_COUPON_CODE = "JEFF";
 const TERMS_URL = `${APP_URL}/terms`;
+const PRIVACY_URL = `${APP_URL}/privacy`;
 const THEME_STORAGE_KEY = `${STORAGE_PREFIX}:theme`;
 
 type RidePhase = "ready" | "riding" | "finished";
@@ -68,6 +79,7 @@ type LeaderboardScope = "global" | "friends";
 type LeaderboardPeriod = "daily" | "weekly";
 type LeaderboardMode = "dash" | "freestyle";
 type DashboardTab = "ride" | "shop" | "garage" | "club" | "leaders" | "quest";
+type HelpTopic = "play" | "world" | "access" | "club" | "fan" | "rank";
 type RideArea = "park" | "statePark" | "bikeLand" | "skyline";
 type MissionKind = "combo" | "clean" | "boosts" | "battery" | "bolts";
 type SfxId = "start" | "lane" | "bolt" | "boost" | "hit" | "clear" | "finish" | "warning" | "near" | "combo";
@@ -377,9 +389,9 @@ const RANGER_STATS = [
 ];
 
 const RANGER_FUN_FACTS = [
-  "Moped-style frame, fat tires, and long bench seat make it feel closer to a mini moto than a lightweight commuter.",
-  "The 864Wh battery is the range story, but speed, hills, weight, wind, tire pressure, and throttle use all matter.",
-  "Hydraulic brakes and local Class 3 rules are the two things to inspect before treating it like a fast street ride.",
+  "Moped feel. Fat tires.",
+  "864Wh range story.",
+  "Hydraulic brakes. Check Class 3 rules.",
 ];
 
 const RANGER_VIDEOS = [
@@ -413,34 +425,43 @@ const RANGER_SHORTS = [
 
 function rangerGuideAnswer(input: string) {
   const text = input.toLowerCase();
+  if (text.includes("lectric") || text.includes("xp4")) {
+    return "Lectric XP4 is a foldable utility line: XP4 around $999, XP4 750 around $1.3k, both listed up to 28 mph. Verify sale bundle, range assumptions, and local Class 3 rules.";
+  }
+  if (text.includes("tst") || text.includes("r002") || text.includes("carrier") || text.includes("buddy") || text.includes("jeff")) {
+    return `TST has Jeff's referral link and coupon ${TST_COUPON_CODE} for the advertised $100 off credit. Verify final price, specs, support, and local class rules.`;
+  }
+  if (text.includes("aventon") || text.includes("aventure") || text.includes("pace") || text.includes("level")) {
+    return "Aventon is best checked through official sale and model pages. Compare fit, accessories, dealer support, final price, and local Class 3 rules.";
+  }
   if (text.includes("price") || text.includes("deal") || text.includes("buy") || text.includes("sale") || text.includes("coupon")) {
-    return `The current fan-page deal callout is $799, plus a $50 off coupon code: ${KINGBULL_COUPON_CODE}. Use Buy Ranger or Deals for the affiliate promo link, and verify final price at checkout.`;
+    return `Ranger deal callout: $799* plus code ${KINGBULL_COUPON_CODE}. Affiliate links may pay us; verify final checkout price.`;
   }
   if (text.includes("range") || text.includes("battery") || text.includes("mile")) {
-    return "Ranger is listed with a 48V 18Ah battery, 864Wh total capacity, and up to 80 miles under ideal conditions. Real range changes with speed, rider weight, hills, tire pressure, wind, cargo, and throttle use.";
+    return "Ranger lists a 48V 18Ah, 864Wh pack and up to 80 miles in ideal conditions. Real range changes with speed, hills, wind, cargo, and throttle use.";
   }
   if (text.includes("speed") || text.includes("class") || text.includes("legal") || text.includes("law")) {
-    return "The Ranger is listed up to 28 mph, which is Class 3 territory in many US areas. E-bike laws vary by state, city, trail, and path, so check local rules before riding fast or using throttle.";
+    return "Ranger is listed up to 28 mph, often Class 3 territory in the U.S. Check state, city, trail, and throttle rules before riding fast.";
   }
   if (text.includes("motor") || text.includes("torque") || text.includes("hill")) {
-    return "The listed motor is a 750W brushless rear hub with 1300W peak and 80 Nm torque. That is a strong setup for a moped-style fat tire e-bike, but steep hills and heavy payloads still reduce speed and range.";
+    return "Listed motor: 750W rear hub, 1300W peak, 80 Nm torque. Strong for fat tires, but hills and payload still cut speed and range.";
   }
   if (text.includes("weight") || text.includes("carry") || text.includes("payload") || text.includes("two")) {
-    return "Ranger is listed around 88 lb with a 350 lb max payload and an extended bench seat. It is more moped-style than lightweight bicycle, so plan storage, stairs, racks, and transport carefully.";
+    return "Ranger is listed around 88 lb with a 350 lb max payload. Plan storage, stairs, racks, and transport before buying.";
   }
   if (text.includes("brake") || text.includes("safety") || text.includes("helmet")) {
-    return "The listed brakes are dual hydraulic discs with 180mm rotors and motor cut-off levers. Wear a helmet, test brakes before rides, and treat 20x4 fat tires plus moped weight with respect.";
+    return "Listed brakes: dual hydraulic discs with 180mm rotors and cut-off levers. Wear gear, test brakes, and ride within skill.";
   }
   if (text.includes("tire") || text.includes("suspension") || text.includes("comfort")) {
-    return "Ranger is listed with CST 20 x 4.0 fat tires, a dual-crown front fork, and a rear spring shock. That points toward comfort and mixed-surface stability, not nimble lightweight handling.";
+    return "Ranger lists 20 x 4 fat tires, dual-crown front fork, and rear spring shock. Comfort and stability, not lightweight handling.";
   }
   if (text.includes("video") || text.includes("review") || text.includes("youtube") || text.includes("short")) {
-    return "Scroll the Quest tab for long videos and Shorts. If an embed is blocked by an in-app browser, use the Open button to launch YouTube directly.";
+    return "Scroll Fan for videos and Shorts. If an embed is blocked, tap Open for YouTube.";
   }
   if (text.includes("affiliate") || text.includes("official") || text.includes("fan")) {
-    return "This is an unaffiliated CasterCycle fan page. Promo buttons may be affiliate links. Specs and availability can change, so verify important details with Kingbull before buying.";
+    return "This is unaffiliated editorial fan content. Promo buttons may be affiliate links. No brand endorsement, warranty, liability, or purchase advice is promised. Verify specs, price, safety, and laws before buying or riding.";
   }
-  return "Ask about range, speed, motor, battery, brakes, payload, laws, videos, or deals. I will keep it practical and remind you what to verify before buying or riding.";
+  return "Ask range, speed, motor, brakes, payload, laws, videos, or deals. Verify before buying or riding.";
 }
 
 const DAILY_MISSIONS: DailyMission[] = [
@@ -1212,6 +1233,7 @@ export default function CasterCycleApp() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [systemTheme, setSystemTheme] = useState<"dark" | "light">("dark");
+  const [helpTopic, setHelpTopic] = useState<HelpTopic | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
 
@@ -2784,6 +2806,10 @@ export default function CasterCycleApp() {
                   routeName={game.route.name}
                   score={hud.score}
                   finished={hud.phase === "finished"}
+                  onHelp={() => {
+                    haptic("selection");
+                    setHelpTopic(helpTopicForTab(dashboardTab));
+                  }}
                 />
 
                 {dashboardTab === "ride" && (
@@ -2866,7 +2892,7 @@ export default function CasterCycleApp() {
                       onVoiceInfo={() => playVoice("legal", {}, true)}
                     />
                     <PassHistoryPanel receipts={passReceipts} dayActive={dayActive} annualActive={annualActive} passUntil={passDisplayUntil} />
-                    <LegalDisclosurePanel onOpenTerms={() => openExternal(TERMS_URL)} />
+                    <LegalDisclosurePanel onOpenTerms={() => openExternal(TERMS_URL)} onOpenPrivacy={() => openExternal(PRIVACY_URL)} />
                   </>
                 )}
 
@@ -2919,10 +2945,13 @@ export default function CasterCycleApp() {
           active={dashboardTab}
           onSelect={(tab) => {
             haptic("selection");
+            setHelpTopic(null);
             setDashboardTab(tab);
           }}
         />
       )}
+
+      {helpTopic && <HelpOverlay topic={helpTopic} onClose={() => setHelpTopic(null)} />}
 
       <div className="pointer-events-none absolute inset-y-0 left-0 z-10 flex items-center pl-2 text-white/45">
         <ChevronLeft size={26} />
@@ -3182,22 +3211,22 @@ function OnboardingPanel({
     {
       icon: <Map size={18} />,
       kicker: "Roam",
-      title: "30s free park",
-      body: "Any direction. Paths are fast.",
+      title: "Park",
+      body: "30s free",
       accent: "#fbe764",
     },
     {
       icon: <Trophy size={18} />,
       kicker: "Dash",
-      title: "Daily score run",
-      body: `${routeName}. Beat friends.`,
+      title: "Score",
+      body: routeName,
       accent: "#7cf2ff",
     },
     {
       icon: <Wallet size={18} />,
       kicker: "Pass",
-      title: "$1 day / $7 life",
-      body: "Unlimited parks, bikes, lounge.",
+      title: "Unlock",
+      body: "$1 / $7",
       accent: "#a2ff9a",
     },
   ];
@@ -3208,8 +3237,7 @@ function OnboardingPanel({
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[#7cf2ff]">Welcome</div>
-          <h1 className="cc-intro-title mt-1 text-3xl font-black leading-none tracking-normal text-white">Ride CasterCycle</h1>
-          <p className="cc-intro-copy mt-2 text-sm font-semibold leading-5 text-white/64">Pick a ride. Cast the score. Come back tomorrow.</p>
+          <h1 className="cc-intro-title mt-1 text-3xl font-black leading-none tracking-normal text-white">Ride. Score. Share.</h1>
         </div>
         <Image
           src="/media/castercycle.png"
@@ -3249,7 +3277,7 @@ function OnboardingPanel({
           }}
         >
           <Bike size={18} />
-          Roam Free
+          Roam
         </button>
         <button
           className="inline-flex min-h-12 items-center justify-center gap-2 rounded-md bg-[#fbe764] px-4 text-sm font-black text-[#071018] transition active:scale-[0.98]"
@@ -3271,7 +3299,7 @@ function OnboardingPanel({
             onSkip();
           }}
         >
-          Skip
+          Later
         </button>
         {!miniAppAdded && (
           <button
@@ -3307,8 +3335,8 @@ function WelcomeBackPanel({
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
           <div className="text-[10px] font-black uppercase tracking-[0.22em] text-[#7cf2ff]">Welcome back</div>
-          <h1 className="cc-intro-title mt-1 text-3xl font-black leading-none tracking-normal text-white">Today&apos;s Ride</h1>
-          <p className="cc-intro-copy mt-2 truncate text-sm font-semibold leading-5 text-white/68">{displayName} - {routeName}</p>
+          <h1 className="cc-intro-title mt-1 text-3xl font-black leading-none tracking-normal text-white">Ride today</h1>
+          <p className="cc-intro-copy mt-2 truncate text-sm font-semibold leading-5 text-white/68">{routeName}</p>
         </div>
         <Image
           src="/media/castercycle.png"
@@ -3345,7 +3373,7 @@ function WelcomeBackPanel({
       <div className="mt-3 grid grid-cols-3 gap-2">
         <FeatureChip icon={<Zap size={13} />} label="daily" />
         <FeatureChip icon={<Trophy size={13} />} label="rank" />
-        <FeatureChip icon={<Wallet size={13} />} label="wallet" />
+        <FeatureChip icon={<UserRound size={13} />} label={displayName} />
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-2">
@@ -3369,12 +3397,21 @@ function WelcomeBackPanel({
 }
 
 function dashboardMeta(tab: DashboardTab) {
-  if (tab === "shop") return { title: "Passport", kicker: "premium access", detail: "Stamps, missions, pass, and receipts.", accent: "#35f6c8", icon: <Wallet size={18} /> };
-  if (tab === "garage") return { title: "World", kicker: "map + bike", detail: "Choose the park, target spot, and skin.", accent: "#a2ff9a", icon: <Map size={18} /> };
-  if (tab === "club") return { title: "Club", kicker: "rider lounge", detail: "Clean chat for pass riders.", accent: "#c4b5fd", icon: <Users size={18} /> };
-  if (tab === "quest") return { title: "Fan", kicker: "Ranger guide", detail: "Organized fan info, links, and videos.", accent: "#ff9ec7", icon: <Sparkles size={18} /> };
-  if (tab === "leaders") return { title: "Rank", kicker: "leaderboard", detail: "Daily and weekly Farcaster challenges.", accent: "#fbe764", icon: <Trophy size={18} /> };
-  return { title: "Play", kicker: "ride now", detail: "Daily Dash, free roam, and premium worlds.", accent: "#7cf2ff", icon: <Play size={18} /> };
+  if (tab === "shop") return { title: "Access", kicker: "passport", accent: "#35f6c8", icon: <Wallet size={18} /> };
+  if (tab === "garage") return { title: "World", kicker: "map + bike", accent: "#a2ff9a", icon: <Map size={18} /> };
+  if (tab === "club") return { title: "Club", kicker: "lounge", accent: "#c4b5fd", icon: <Users size={18} /> };
+  if (tab === "quest") return { title: "Fan", kicker: "deals", accent: "#ff9ec7", icon: <Sparkles size={18} /> };
+  if (tab === "leaders") return { title: "Rank", kicker: "scores", accent: "#fbe764", icon: <Trophy size={18} /> };
+  return { title: "Play", kicker: "ride now", accent: "#7cf2ff", icon: <Play size={18} /> };
+}
+
+function helpTopicForTab(tab: DashboardTab): HelpTopic {
+  if (tab === "shop") return "access";
+  if (tab === "garage") return "world";
+  if (tab === "club") return "club";
+  if (tab === "quest") return "fan";
+  if (tab === "leaders") return "rank";
+  return "play";
 }
 
 function DashboardHeader({
@@ -3382,11 +3419,13 @@ function DashboardHeader({
   routeName,
   score,
   finished,
+  onHelp,
 }: {
   tab: DashboardTab;
   routeName: string;
   score: number;
   finished: boolean;
+  onHelp: () => void;
 }) {
   const meta = dashboardMeta(tab);
 
@@ -3405,13 +3444,22 @@ function DashboardHeader({
             </p>
           )}
         </div>
-        <Image
-          src="/media/castercycle.png"
-          alt=""
-          width={56}
-          height={56}
-          className="cc-dashboard-image h-14 w-14 shrink-0 rounded-md border border-white/15 object-cover shadow-lg"
-        />
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            aria-label={`Help for ${meta.title}`}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/12 bg-white/8 text-white/76 transition active:scale-[0.98]"
+            onClick={onHelp}
+          >
+            <HelpCircle size={18} />
+          </button>
+          <Image
+            src="/media/castercycle.png"
+            alt=""
+            width={48}
+            height={48}
+            className="cc-dashboard-image h-12 w-12 rounded-md border border-white/15 object-cover shadow-lg"
+          />
+        </div>
       </div>
     </div>
   );
@@ -3450,6 +3498,63 @@ function DashboardNav({ active, onSelect }: { active: DashboardTab; onSelect: (t
         </div>
       </div>
     </nav>
+  );
+}
+
+function helpMeta(topic: HelpTopic) {
+  if (topic === "world") {
+    return { title: "World", kicker: "set ride", accent: "#a2ff9a", icon: <Map size={18} />, steps: ["Pick park", "Pick spot", "Pick skin"] };
+  }
+  if (topic === "access") {
+    return { title: "Access", kicker: "premium", accent: "#35f6c8", icon: <Wallet size={18} />, steps: ["Buy pass", "Stamp worlds", "Ride bikes"] };
+  }
+  if (topic === "club") {
+    return { title: "Club", kicker: "lounge", accent: "#c4b5fd", icon: <Users size={18} />, steps: ["Pass riders", "Short chat", "No links"] };
+  }
+  if (topic === "fan") {
+    return { title: "Fan", kicker: "shop smarter", accent: "#ff9ec7", icon: <Sparkles size={18} />, steps: ["Compare", "Use codes", "Verify"] };
+  }
+  if (topic === "rank") {
+    return { title: "Rank", kicker: "scores", accent: "#fbe764", icon: <Trophy size={18} />, steps: ["Dash", "Beat best", "Challenge"] };
+  }
+  return { title: "Play", kicker: "how to ride", accent: "#7cf2ff", icon: <Play size={18} />, steps: ["Roam", "Dash", "Share"] };
+}
+
+function HelpOverlay({ topic, onClose }: { topic: HelpTopic; onClose: () => void }) {
+  const meta = helpMeta(topic);
+
+  return (
+    <div className="pointer-events-auto absolute inset-0 z-50 flex items-end bg-black/34 p-3 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`${meta.title} help`} onClick={onClose}>
+      <div className="w-full rounded-md border border-white/14 bg-[#071018]/96 p-3 shadow-[0_-30px_90px_rgba(0,0,0,0.54)]" onClick={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-[#071018]" style={{ backgroundColor: meta.accent }}>
+              {meta.icon}
+            </span>
+            <div className="min-w-0">
+              <div className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: meta.accent }}>{meta.kicker}</div>
+              <div className="mt-1 text-2xl font-black leading-none text-white">{meta.title}</div>
+            </div>
+          </div>
+          <button aria-label="Close help" className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-white/12 bg-white/8 text-white/70 active:scale-[0.98]" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {meta.steps.map((step, index) => (
+            <div key={step} className="min-h-16 rounded-md border border-white/10 bg-white/[0.06] p-2">
+              <div className="text-[9px] font-black uppercase tracking-[0.08em] text-white/36">0{index + 1}</div>
+              <div className="mt-2 text-sm font-black leading-tight text-white">{step}</div>
+            </div>
+          ))}
+        </div>
+
+        <button className="mt-3 min-h-11 w-full rounded-md bg-[#fbe764] px-4 text-sm font-black text-[#071018] active:scale-[0.98]" onClick={onClose}>
+          Got it
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -4000,7 +4105,7 @@ function DailyRewardPanel({
             Daily reward
           </div>
           <div className="mt-1 text-sm font-black text-white">{claimed ? "Badge claimed" : "Claim today's badge"}</div>
-          <div className="mt-0.5 text-xs font-semibold text-white/58">Share for a bonus badge. Come back tomorrow.</div>
+          <div className="mt-0.5 text-xs font-semibold text-white/58">Share. Return tomorrow.</div>
         </div>
         {claimed && <CheckCircle2 size={22} className="shrink-0 text-[#a2ff9a]" />}
       </div>
@@ -4083,7 +4188,7 @@ function FarcasterWalletPanel({
             {address ? shortAddress(address) : "Mini App wallet"}
           </div>
           <div className="mt-0.5 text-xs font-semibold leading-5 text-white/58">
-            {address ? "Passes and receipts use this Mini App wallet." : "Wallet approval opens only when you tap buy."}
+            {address ? "Pass wallet ready." : "Approval opens on buy."}
           </div>
         </div>
         <div className={`shrink-0 rounded-md border px-2 py-1 text-right ${connected ? "border-[#a2ff9a]/45 bg-[#a2ff9a]/14" : "border-white/12 bg-white/8"}`}>
@@ -4356,7 +4461,7 @@ function LoungePanel({ proActive, user }: { proActive: boolean; user?: { fid?: n
           Paid Club Lounge
         </div>
         <div className="mt-2 text-lg font-black text-white">Unlock the rider club.</div>
-        <p className="mt-1 text-xs font-semibold leading-5 text-white/58">Short clean chat, garage talk, and paid rider perks live here.</p>
+        <p className="mt-1 text-xs font-semibold leading-5 text-white/58">Clean chat. Rider perks.</p>
       </div>
     );
   }
@@ -4422,12 +4527,169 @@ function LoungePanel({ proActive, user }: { proActive: boolean; user?: { fid?: n
   );
 }
 
+function EbikeDealBoard({ onOpen, onShare }: { onOpen: (url: string) => void; onShare: () => void }) {
+  const copyCode = (code: string) => {
+    navigator.clipboard?.writeText(code).catch(() => {});
+    haptic("selection");
+  };
+  const brands = [
+    {
+      id: "ranger",
+      title: "Kingbull Ranger",
+      kicker: "fan deal",
+      accent: "#fbe764",
+      icon: <Sparkles size={13} />,
+      badge: KINGBULL_COUPON_CODE,
+      body: "Moped-style deal check.",
+      stats: [
+        ["Deal", "$799*"],
+        ["Range", "80 mi*"],
+        ["Speed", "28 mph*"],
+      ],
+      actions: [
+        { label: "Deal", primary: true, onClick: () => onOpen(KINGBULL_RANGER_URL) },
+        { label: "Code", onClick: () => copyCode(KINGBULL_COUPON_CODE) },
+        { label: "Share", onClick: onShare },
+      ],
+      note: "Check class + fit.",
+    },
+    {
+      id: "aventon",
+      title: "Aventon",
+      kicker: "official links",
+      accent: "#7cf2ff",
+      icon: <Bike size={13} />,
+      badge: "AvantLink",
+      body: "Official sale links.",
+      stats: [
+        ["Sale", "Live"],
+        ["Shops", "1.8k+"],
+        ["Safety", "UL"],
+      ],
+      actions: [
+        { label: "Sale", primary: true, onClick: () => onOpen(AVENTON_SALE_URL) },
+        { label: "Models", onClick: () => onOpen(AVENTON_EBIKES_URL) },
+        { label: "Compare", onClick: () => onOpen(AVENTON_COMPARE_URL) },
+      ],
+      note: "Official pages.",
+    },
+    {
+      id: "lectric",
+      title: "Lectric XP4",
+      kicker: "folding utility",
+      accent: "#a2ff9a",
+      icon: <Zap size={13} />,
+      badge: "28 mph",
+      body: "Foldable XP4 sale.",
+      stats: [
+        ["XP4", "$999*"],
+        ["750", "$1.3k*"],
+        ["Speed", "28"],
+      ],
+      actions: [
+        { label: "XP4 sale", primary: true, onClick: () => onOpen(LECTRIC_XP4_URL) },
+        { label: "Site", onClick: () => onOpen(LECTRIC_URL) },
+      ],
+      note: "Fold + cargo.",
+    },
+    {
+      id: "tst",
+      title: "TST E-Bikes",
+      kicker: "referral",
+      accent: "#ff8b4a",
+      icon: <Flame size={13} />,
+      badge: `$100 ${TST_COUPON_CODE}`,
+      body: "Referral + coupon.",
+      stats: [
+        ["Code", "$100"],
+        ["Models", "5+"],
+        ["Link", "5%"],
+      ],
+      actions: [
+        { label: "Ref", primary: true, onClick: () => onOpen(TST_REFERRAL_URL) },
+        { label: "Code", onClick: () => copyCode(TST_COUPON_CODE) },
+        { label: "Sale", onClick: () => onOpen(TST_DISCOUNT_URL) },
+        { label: "Compare", onClick: () => onOpen(TST_COMPARE_URL) },
+      ],
+      note: "Use code JEFF.",
+    },
+  ];
+
+  return (
+    <div className="rounded-md border border-white/12 bg-[linear-gradient(135deg,rgba(255,255,255,0.08),rgba(255,255,255,0.025))] p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#fbe764]">
+            <Sparkles size={13} />
+            e-bike deal board
+          </div>
+          <div className="mt-1 text-xl font-black leading-tight text-white">Sales, Codes, Links</div>
+          <div className="mt-1 text-xs font-semibold leading-5 text-white/62">Compare offers fast.</div>
+        </div>
+        <div className="shrink-0 rounded-md border border-white/12 bg-black/18 px-2 py-1 text-right">
+          <div className="text-[9px] font-black uppercase tracking-[0.1em] text-white/42">brands</div>
+          <div className="text-sm font-black text-white">{brands.length}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        {brands.map((brand) => (
+          <div key={brand.id} className="rounded-md border border-white/12 bg-black/18 p-2">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-[0.1em]" style={{ color: brand.accent }}>
+                  {brand.icon}
+                  {brand.kicker}
+                </div>
+                <div className="mt-1 text-sm font-black leading-tight text-white">{brand.title}</div>
+              </div>
+              <div className="shrink-0 rounded border border-white/10 bg-white/8 px-1.5 py-1 text-[9px] font-black uppercase text-white/68">
+                {brand.badge}
+              </div>
+            </div>
+            <div className="mt-2 min-h-8 text-[10px] font-semibold leading-4 text-white/54">{brand.body}</div>
+            <div className="mt-2 grid grid-cols-3 gap-1">
+              {brand.stats.map(([label, value]) => (
+                <div key={`${brand.id}-${label}`} className="min-w-0 rounded border border-white/8 bg-white/[0.04] px-1.5 py-1">
+                  <div className="truncate text-[7px] font-black uppercase tracking-[0.04em] text-white/34">{label}</div>
+                  <div className="mt-0.5 truncate text-[10px] font-black text-white">{value}</div>
+                </div>
+              ))}
+            </div>
+            <div className={`mt-2 grid gap-1 ${brand.actions.length === 2 ? "grid-cols-2" : brand.actions.length === 4 ? "grid-cols-4" : "grid-cols-3"}`}>
+              {brand.actions.map((action) => (
+                <button
+                  key={`${brand.id}-${action.label}`}
+                  className={`min-h-8 rounded-md px-1.5 text-[9px] font-black uppercase active:scale-[0.98] ${
+                    action.primary ? "text-[#071018]" : "border border-white/12 bg-white/8 text-white/72"
+                  }`}
+                  style={action.primary ? { backgroundColor: brand.accent } : undefined}
+                  onClick={action.onClick}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-2 border-t border-white/8 pt-2 text-[9px] font-black uppercase tracking-[0.06em] text-white/42">
+              {brand.note}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-3 rounded-md border border-[#ff5d73]/24 bg-[#ff5d73]/10 p-2 text-[10px] font-semibold leading-4 text-white/55">
+        Verify price, specs, coupons, shipping, warranty, and local rules.
+      </div>
+    </div>
+  );
+}
+
 function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; onShare: () => void }) {
   const [guideDraft, setGuideDraft] = useState("");
   const [guideMessages, setGuideMessages] = useState<RangerGuideMessage[]>([
     {
       role: "guide",
-      text: "I can help sort Ranger facts: deal, range, speed class, motor, brakes, weight, videos, and what to verify before buying.",
+      text: "Ask deal, range, class, or code.",
     },
   ]);
 
@@ -4440,57 +4702,7 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
 
   return (
     <div className="mt-4">
-      <div className="rounded-md border border-[#fbe764]/28 bg-[linear-gradient(135deg,rgba(251,231,100,0.12),rgba(124,242,255,0.08)_55%,rgba(255,122,223,0.08))] p-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#fbe764]">
-              <Sparkles size={13} />
-              fan guide
-            </div>
-            <div className="mt-1 text-xl font-black leading-tight text-white">Ranger Fan Garage</div>
-            <div className="mt-1 text-xs font-semibold leading-5 text-white/62">
-              A clean checklist for the Kingbull Ranger: deal, specs, videos, and buyer cautions in one place.
-            </div>
-          </div>
-          <div className="shrink-0 rounded-md border border-[#a2ff9a]/35 bg-[#a2ff9a]/12 px-2 py-1 text-right">
-            <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#a2ff9a]">code</div>
-            <div className="text-sm font-black text-white">{KINGBULL_COUPON_CODE}</div>
-          </div>
-        </div>
-
-        <div className="mt-3 grid grid-cols-3 gap-1.5">
-          {[
-            ["Deal", "$799*"],
-            ["Range", "80 mi*"],
-            ["Class", "28 mph*"],
-          ].map(([label, value]) => (
-            <div key={label} className="rounded-md border border-white/10 bg-black/16 px-2 py-2">
-              <div className="text-[8px] font-black uppercase tracking-[0.08em] text-white/38">{label}</div>
-              <div className="mt-1 truncate text-sm font-black text-white">{value}</div>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-3 grid grid-cols-3 gap-2">
-          <button className="min-h-10 rounded-md bg-[#fbe764] px-2 text-[10px] font-black uppercase text-[#071018]" onClick={() => onOpen(KINGBULL_RANGER_URL)}>
-            Deal link
-          </button>
-          <button
-            className="min-h-10 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/14 px-2 text-[10px] font-black uppercase text-white"
-            onClick={() => {
-              navigator.clipboard?.writeText(KINGBULL_COUPON_CODE).catch(() => {});
-            }}
-          >
-            Copy code
-          </button>
-          <button className="min-h-10 rounded-md border border-white/12 bg-white/8 px-2 text-[10px] font-black uppercase text-white/76" onClick={onShare}>
-            Share
-          </button>
-        </div>
-        <div className="mt-2 text-[10px] font-semibold leading-4 text-white/44">
-          *Fan page signals only. Verify current price, specs, warranty, taxes, shipping, and local e-bike rules.
-        </div>
-      </div>
+      <EbikeDealBoard onOpen={onOpen} onShare={onShare} />
 
       <div className="mt-3 rounded-md border border-[#7cf2ff]/24 bg-[#7cf2ff]/10 p-3">
         <div className="flex items-center justify-between gap-2">
@@ -4527,7 +4739,7 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
           <input
             value={guideDraft}
             maxLength={120}
-            placeholder="Ask Ranger info..."
+            placeholder="Ask deal, range, class..."
             className="min-h-10 min-w-0 flex-1 rounded-md border border-white/12 bg-black/24 px-3 text-sm font-semibold text-white outline-none placeholder:text-white/32"
             onChange={(event) => setGuideDraft(event.target.value)}
             onKeyDown={(event) => {
@@ -4538,9 +4750,7 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
             Ask
           </button>
         </div>
-        <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.08em] text-white/38">
-          Fan info only. Verify official specs and local laws.
-        </div>
+        <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.08em] text-white/38">Verify before buying.</div>
       </div>
 
       <div className="mt-3 grid grid-cols-2 gap-2">
@@ -4649,7 +4859,7 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
           fan page terms
         </div>
         <div className="mt-1 text-[11px] font-semibold leading-4 text-white/60">
-          CasterCycle is not affiliated with, sponsored by, or endorsed by Kingbull. Specs, prices, promotions, laws, and availability can change. Promo buttons may be affiliate links that compensate us. Verify with Kingbull, inspect the bike, wear proper safety gear, and follow local e-bike rules. No legal, safety, purchase, warranty, or fitness-for-use advice.
+          Editorial only. Not affiliated. Links may pay us. No warranty, advice, or liability. Verify everything.
         </div>
       </div>
     </div>
@@ -4875,7 +5085,7 @@ function UpgradePanel({
           </div>
           <div className="mt-1 text-xl font-black leading-tight text-white">{urgent ? "Keep the ride going" : "Unlimited park riding"}</div>
           <div className="mt-1 text-xs font-semibold leading-4 text-white/64">
-            {urgent ? "Your free session ended. A day pass resumes unlimited Freestyle today." : "30 seconds free. Pass unlocks E-Bike Land, Skyline Circuit, Glow Track, and the lounge."}
+            {urgent ? "Free ride ended. Day pass resumes today." : "Free 30s. Pass unlocks worlds, skins, lounge."}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -4954,7 +5164,7 @@ function UpgradePanel({
           payment trust
         </div>
         <div className="mt-1 text-[11px] font-semibold leading-4 text-white/58">
-          Farcaster opens the wallet approval only when you tap buy. Payment goes directly to treasury, and CasterCycle remembers your pass locally.
+          Wallet opens on buy. Pass saves locally.
         </div>
       </div>
       <button
@@ -5015,30 +5225,40 @@ function PassHistoryPanel({
   );
 }
 
-function LegalDisclosurePanel({ onOpenTerms }: { onOpenTerms: () => void }) {
+function LegalDisclosurePanel({ onOpenTerms, onOpenPrivacy }: { onOpenTerms: () => void; onOpenPrivacy: () => void }) {
   return (
     <div className="mt-3 rounded-md border border-[#ff5d73]/24 bg-[#ff5d73]/10 p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#ff9aac]">
             <ShieldCheck size={13} />
-            terms snapshot
+            legal snapshot
           </div>
-          <div className="mt-1 text-sm font-black text-white">Ride for fun. You stay in control.</div>
+          <div className="mt-1 text-sm font-black text-white">For fun. Your risk. Your choices.</div>
         </div>
-        <button
-          className="shrink-0 rounded-md border border-white/12 bg-white/8 px-2 py-1 text-[9px] font-black uppercase text-white/64"
-          onClick={onOpenTerms}
-        >
-          Full terms
-        </button>
+        <div className="grid shrink-0 grid-cols-1 gap-1">
+          <button
+            className="rounded-md border border-white/12 bg-white/8 px-2 py-1 text-[9px] font-black uppercase text-white/64"
+            onClick={onOpenTerms}
+          >
+            Terms
+          </button>
+          <button
+            className="rounded-md border border-white/12 bg-white/8 px-2 py-1 text-[9px] font-black uppercase text-white/64"
+            onClick={onOpenPrivacy}
+          >
+            Privacy
+          </button>
+        </div>
       </div>
       <div className="mt-2 grid grid-cols-2 gap-1.5">
         {[
-          ["No advice", "No financial, tax, legal, safety, or purchase advice."],
-          ["Passes", "Optional passes unlock play time only."],
-          ["Your wallet", "You approve transactions, pay gas, manage taxes, and follow local rules."],
-          ["No rewards", "No payout, prize, resale, or redemption promise."],
+          ["Editorial", "Fan content. Not affiliated."],
+          ["Advice", "No legal, tax, safety, or buy advice."],
+          ["Liability", "As-is app. No warranty."],
+          ["Privacy", "Scores, chat, wallet data process."],
+          ["Passes", "Play access only. No rewards."],
+          ["Your wallet", "You approve, pay gas, follow rules."],
         ].map(([title, detail]) => (
           <div key={title} className="rounded-md border border-white/10 bg-black/16 px-2 py-2">
             <div className="text-[9px] font-black uppercase tracking-[0.08em] text-white/46">{title}</div>

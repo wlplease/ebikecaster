@@ -9,7 +9,7 @@ const accountAssociation = getAccountAssociation();
 
 const miniAppEmbed = {
   version: "1",
-  imageUrl: appUrl("/media/castercycle-card.png"),
+  imageUrl: appUrl("/media/castercycle-home-preview.png"),
   button: {
     title: "Ride CasterCycle",
     action: {

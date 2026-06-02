@@ -66,7 +66,7 @@ function voiceLine(line: LineId, request: NextRequest) {
   if (line === "boost") return "Boost chain. Keep it clean.";
   if (line === "mission") return `${mission} cleared. Nice ride.`;
   if (line === "finish") return "Ride complete. Share the score and make the feed chase you.";
-  if (line === "legal") return "CasterCycle is for entertainment. Optional passes unlock play time only. No pass, wallet action, affiliate link, score, or social feature is investment, legal, tax, safety, or purchase advice, and no reward or payout is promised.";
+  if (line === "legal") return "CasterCycle is entertainment and editorial fan content. It is not affiliated with e-bike brands. Passes unlock play only. Affiliate links may pay us. No legal, tax, safety, product, purchase, reward, warranty, or liability promise is made.";
   if (line === "lowBattery") return "Low charge. Collect bolts or keep the line clean.";
   if (line === "checkpoint") return "Halfway marker. Hold the flow and bring it home.";
   if (line === "combo") return "Ten flow. You are locked into the lane.";
