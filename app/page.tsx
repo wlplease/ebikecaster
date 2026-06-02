@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import Image from "next/image";
 import {
   BatteryCharging,
@@ -11,20 +11,24 @@ import {
   Crown,
   Flame,
   Gauge,
+  Home,
   Lock,
   Map,
   Play,
   Radio,
+  Settings,
   Share2,
   ShieldCheck,
   Sparkles,
   Target,
   Trophy,
+  UserRound,
   Users,
   ExternalLink,
   Volume2,
   VolumeX,
   Wallet,
+  X,
   Zap,
 } from "lucide-react";
 import { sdk } from "@farcaster/miniapp-sdk";
@@ -51,14 +55,11 @@ const STORAGE_PREFIX = "castercycle";
 const DAY_SECONDS = 24 * 60 * 60;
 const LIFETIME_SECONDS = 80 * 365 * 24 * 60 * 60;
 const FREE_ROAM_SECONDS = 30;
-const KINGBULL_AWIN_URL = "https://www.awin1.com/cread.php?awinmid=124136&awinaffid=2916043";
-const KINGBULL_DISCOVER_ST_URL = "https://www.kingbullbike.com/products/kingbull-discover-st2-0-premium-off-road-city-electric-bike";
-const KINGBULL_DISCOVER_ST_AWIN_URL = `${KINGBULL_AWIN_URL}&ued=${encodeURIComponent(KINGBULL_DISCOVER_ST_URL)}`;
 const KINGBULL_RANGER_URL = "https://sovrn.co/1f76den";
-const KINGBULL_SOVRN_URL = KINGBULL_RANGER_URL;
 const KINGBULL_COUPON_CODE = process.env.NEXT_PUBLIC_KINGBULL_COUPON_CODE || "GET50OFF";
 const KINGBULL_REDDIT_SEARCH_URL = "https://www.reddit.com/r/ebikes/search/?q=kingbull%20ranger&restrict_sr=1";
 const TERMS_URL = `${APP_URL}/terms`;
+const THEME_STORAGE_KEY = `${STORAGE_PREFIX}:theme`;
 
 type RidePhase = "ready" | "riding" | "finished";
 type Lane = -1 | 0 | 1;
@@ -89,6 +90,7 @@ type VoiceLineId =
   | "paywall";
 type HapticKind = "selection" | "light" | "medium" | "heavy" | "success" | "warning" | "error";
 type PassPlan = "day" | "lifetime";
+type ThemeMode = "system" | "dark" | "light" | "custom";
 
 type RouteTheme = {
   name: string;
@@ -372,19 +374,12 @@ const RANGER_STATS = [
   { label: "Range", value: "Up to 80 miles", detail: "Ideal conditions, rider/load dependent." },
   { label: "Motor", value: "750W hub", detail: "1300W peak, 80 Nm listed torque." },
   { label: "Battery", value: "48V 18Ah", detail: "864Wh lithium pack." },
-  { label: "Payload", value: "350 lb", detail: "Extended bench seat, two-rider capable." },
-  { label: "Weight", value: "88 lb", detail: "Moped-style fat tire build." },
-  { label: "Tires", value: "20 x 4.0 CST", detail: "Fat tires for mixed surfaces." },
-  { label: "Brakes", value: "Hydraulic", detail: "180mm rotors with motor cut-off levers." },
 ];
 
 const RANGER_FUN_FACTS = [
-  "Moped-style frame and long bench seat make it feel more like a mini moto than a commuter bike.",
-  "The 864Wh battery is the big range story: more watt-hours usually means more room for long rides.",
-  "20 x 4.0 fat tires add comfort and grip, but they also make tire pressure matter a lot.",
-  "Hydraulic brakes are a major plus on an 88 lb e-bike with a 350 lb payload rating.",
-  "A 750W hub motor with 1300W peak is the sweet spot many riders look for on a value fat-tire e-bike.",
-  "Turn signals, brake light behavior, and a color display make it feel more complete for street riding.",
+  "Moped-style frame, fat tires, and long bench seat make it feel closer to a mini moto than a lightweight commuter.",
+  "The 864Wh battery is the range story, but speed, hills, weight, wind, tire pressure, and throttle use all matter.",
+  "Hydraulic brakes and local Class 3 rules are the two things to inspect before treating it like a fast street ride.",
 ];
 
 const RANGER_VIDEOS = [
@@ -403,26 +398,6 @@ const RANGER_VIDEOS = [
     title: "Kingbull Ranger owner video",
     channel: "YouTube",
   },
-  {
-    id: "BcMQ5wPmjZ8",
-    title: "Kingbull Ranger closer look",
-    channel: "YouTube",
-  },
-  {
-    id: "cQ8uWDjUbbM",
-    title: "Kingbull Ranger riding clip",
-    channel: "YouTube",
-  },
-  {
-    id: "PhJJ3qPq-Qg",
-    title: "Kingbull Ranger video",
-    channel: "YouTube",
-  },
-  {
-    id: "MezigbswD8o",
-    title: "Kingbull Ranger extra video",
-    channel: "YouTube",
-  },
 ];
 
 const RANGER_SHORTS = [
@@ -433,18 +408,6 @@ const RANGER_SHORTS = [
   {
     id: "s9wduz319OI",
     title: "Ranger quick look",
-  },
-  {
-    id: "GMz9eHBTM30",
-    title: "Ranger short ride",
-  },
-  {
-    id: "ZxzK8xnXn2A",
-    title: "Ranger short feature",
-  },
-  {
-    id: "9nv-K0AjXGc",
-    title: "Ranger short",
   },
 ];
 
@@ -619,6 +582,80 @@ function yesterdayKey(key: string) {
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function isThemeMode(value: string | null): value is ThemeMode {
+  return value === "system" || value === "dark" || value === "light" || value === "custom";
+}
+
+function readSystemTheme(): "dark" | "light" {
+  if (typeof window === "undefined") return "dark";
+  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function resolveThemeMode(mode: ThemeMode, systemTheme: "dark" | "light") {
+  if (mode === "custom") return "custom";
+  return mode === "system" ? systemTheme : mode;
+}
+
+function appThemeVars(theme: ReturnType<typeof resolveThemeMode>): CSSProperties {
+  if (theme === "light") {
+    return {
+      "--cc-shell-bg": "#eaf5f1",
+      "--cc-panel-bg": "rgba(248, 252, 250, 0.9)",
+      "--cc-panel-border": "rgba(7, 16, 24, 0.14)",
+      "--cc-panel-text": "#071018",
+      "--cc-panel-muted": "rgba(7, 16, 24, 0.58)",
+      "--cc-nav-surface": "rgba(248, 252, 250, 0.92)",
+      "--cc-nav-border": "rgba(7, 16, 24, 0.16)",
+      "--cc-nav-shadow": "0 -18px 52px rgba(23, 55, 68, 0.2)",
+      "--cc-nav-selected-bg": "#071018",
+      "--cc-nav-selected-text": "#ffffff",
+      "--cc-nav-text": "rgba(7, 16, 24, 0.62)",
+      "--cc-nav-icon": "rgba(7, 16, 24, 0.58)",
+      "--cc-popover-bg": "rgba(245, 252, 249, 0.96)",
+      "--cc-popover-text": "#071018",
+      "--cc-popover-muted": "rgba(7, 16, 24, 0.54)",
+    } as CSSProperties;
+  }
+
+  if (theme === "custom") {
+    return {
+      "--cc-shell-bg": "#110f24",
+      "--cc-panel-bg": "rgba(17, 15, 36, 0.9)",
+      "--cc-panel-border": "rgba(255, 122, 223, 0.26)",
+      "--cc-panel-text": "#ffffff",
+      "--cc-panel-muted": "rgba(255, 255, 255, 0.62)",
+      "--cc-nav-surface": "rgba(19, 16, 40, 0.9)",
+      "--cc-nav-border": "rgba(255, 122, 223, 0.36)",
+      "--cc-nav-shadow": "0 -18px 58px rgba(255, 122, 223, 0.12)",
+      "--cc-nav-selected-bg": "linear-gradient(135deg, rgba(255,122,223,0.95), rgba(124,242,255,0.88))",
+      "--cc-nav-selected-text": "#071018",
+      "--cc-nav-text": "rgba(255, 255, 255, 0.62)",
+      "--cc-nav-icon": "rgba(255, 255, 255, 0.56)",
+      "--cc-popover-bg": "rgba(17, 15, 36, 0.96)",
+      "--cc-popover-text": "#ffffff",
+      "--cc-popover-muted": "rgba(255, 255, 255, 0.58)",
+    } as CSSProperties;
+  }
+
+  return {
+    "--cc-shell-bg": "#101b26",
+    "--cc-panel-bg": "rgba(7, 16, 24, 0.9)",
+    "--cc-panel-border": "rgba(255, 255, 255, 0.12)",
+    "--cc-panel-text": "#ffffff",
+    "--cc-panel-muted": "rgba(255, 255, 255, 0.62)",
+    "--cc-nav-surface": "rgba(7, 16, 24, 0.84)",
+    "--cc-nav-border": "rgba(255, 255, 255, 0.16)",
+    "--cc-nav-shadow": "0 -18px 52px rgba(0, 0, 0, 0.36)",
+    "--cc-nav-selected-bg": "rgba(248, 251, 255, 0.92)",
+    "--cc-nav-selected-text": "#071018",
+    "--cc-nav-text": "rgba(255, 255, 255, 0.58)",
+    "--cc-nav-icon": "rgba(255, 255, 255, 0.54)",
+    "--cc-popover-bg": "rgba(7, 16, 24, 0.96)",
+    "--cc-popover-text": "#ffffff",
+    "--cc-popover-muted": "rgba(255, 255, 255, 0.56)",
+  } as CSSProperties;
 }
 
 function angleDelta(from: number, to: number) {
@@ -1172,6 +1209,9 @@ export default function CasterCycleApp() {
   const [passReceipts, setPassReceipts] = useState<PassReceipt[]>([]);
   const [lastRecap, setLastRecap] = useState<RideRecap | null>(null);
   const [destinationSpot, setDestinationSpot] = useState<string | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [themeMode, setThemeMode] = useState<ThemeMode>("system");
+  const [systemTheme, setSystemTheme] = useState<"dark" | "light">("dark");
   const [toast, setToast] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
 
@@ -1189,6 +1229,8 @@ export default function CasterCycleApp() {
   const passUntil = Math.max(dayUntil, annualUntil);
   const passDisplayUntil = passUntil;
   const accessLabel = effectivePro ? formatPassExpiry(passUntil) : "30s free roam";
+  const resolvedTheme = resolveThemeMode(themeMode, systemTheme);
+  const appThemeStyle = appThemeVars(resolvedTheme);
 
   const skinUnlocked = useCallback((item: Skin) => {
     if (item.unlock === "base") return true;
@@ -1227,6 +1269,8 @@ export default function CasterCycleApp() {
       setAnnualUntil(savedAnnualUntil);
       setAudioEnabled(localStorage.getItem(`${STORAGE_PREFIX}:audio`) === "1");
       setVoiceEnabled(localStorage.getItem(`${STORAGE_PREFIX}:voice`) === "1");
+      const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+      if (isThemeMode(savedTheme)) setThemeMode(savedTheme);
       const savedArea = localStorage.getItem(`${STORAGE_PREFIX}:rideArea`);
       if (savedArea === "park" || savedArea === "statePark" || ((savedArea === "bikeLand" || savedArea === "skyline") && savedPassActive)) {
         setRideArea(savedArea);
@@ -1727,6 +1771,22 @@ export default function CasterCycleApp() {
     if (voiceEnabled) playVoice("ready", { route: preview ? `${routeForArea(selectedArea).name} preview` : routeForArea(selectedArea).name });
   }, [destinationSpot, effectivePro, playSfx, playVoice, rideArea, voiceEnabled]);
 
+  const goHome = useCallback(() => {
+    setProfileOpen(false);
+    setShowIntro(false);
+    setShowWelcomeBack(false);
+    setUpgradeIntent(false);
+    setDashboardTab("ride");
+    if (freeRideActive) {
+      stopFreeRide(false);
+    } else if (gameRef.current.phase === "riding") {
+      exitDashToMenu();
+    } else if (gameRef.current.phase === "finished") {
+      resetRide();
+    }
+    haptic("selection");
+  }, [exitDashToMenu, freeRideActive, resetRide, stopFreeRide]);
+
   const changeLane = useCallback((direction: -1 | 1) => {
     if (freeRideActive) {
       const free = freeRideRef.current;
@@ -1767,8 +1827,9 @@ export default function CasterCycleApp() {
     if (current.phase !== "riding") return;
     if (current.airborne <= 0 && current.battery > 8) {
       current.airborne = 1;
-      current.boost = Math.max(current.boost, 0.4);
-      current.battery = clamp(current.battery - 2.2, 0, 100);
+      current.boost = Math.max(current.boost, 0.62);
+      current.speed = clamp(current.speed + 34 * skinStats.boost, 90, 390 * skinStats.speed);
+      current.battery = clamp(current.battery - 1.8, 0, 100);
       syncHud();
       haptic("medium");
       playSfx("boost");
@@ -1994,6 +2055,20 @@ export default function CasterCycleApp() {
   useEffect(() => {
     farcasterHapticsEnabled = hapticsEnabled;
   }, [hapticsEnabled]);
+
+  useEffect(() => {
+    setSystemTheme(readSystemTheme());
+    const media = window.matchMedia("(prefers-color-scheme: light)");
+    const syncTheme = () => setSystemTheme(media.matches ? "light" : "dark");
+    media.addEventListener("change", syncTheme);
+    return () => media.removeEventListener("change", syncTheme);
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+    } catch {}
+  }, [themeMode]);
 
   useEffect(() => {
     try {
@@ -2269,7 +2344,7 @@ export default function CasterCycleApp() {
           stopFreeRide(true);
           playSfx("finish");
         }
-        drawFreeRideScene(ctx, width, height, free, skin, effectivePro && !preview, now, preview);
+        drawFreeRideScene(ctx, width, height, free, skin, effectivePro && !preview, now);
       } else if (current.phase === "riding") {
         const targetOffset = current.targetLane;
         current.laneOffset += (targetOffset - current.laneOffset) * Math.min(1, dt * 10);
@@ -2484,8 +2559,10 @@ export default function CasterCycleApp() {
   return (
     <main
       ref={shellRef}
-      className="relative mx-auto h-dvh w-full max-w-[520px] overflow-hidden bg-[#101b26] text-white"
-      style={{ paddingTop: safeAreaInsets.top, paddingBottom: safeAreaInsets.bottom }}
+      className="cc-app-shell relative mx-auto h-dvh w-full max-w-[520px] overflow-hidden text-white"
+      data-theme-mode={themeMode}
+      data-theme-resolved={resolvedTheme}
+      style={{ ...appThemeStyle, paddingTop: safeAreaInsets.top, paddingBottom: safeAreaInsets.bottom }}
     >
       <canvas
         ref={canvasRef}
@@ -2500,49 +2577,93 @@ export default function CasterCycleApp() {
       />
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(7,17,27,0.08),transparent_24%,transparent_70%,rgba(7,17,27,0.48))]" />
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 px-3 pt-3 cc-top-hud-wrap">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-40 px-3 pt-3 cc-top-hud-wrap">
         <div className="cc-topbar rounded-md border border-white/12 bg-[#071018]/72 p-2 shadow-[0_20px_60px_rgba(0,0,0,0.34)] backdrop-blur-xl">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-            <Image src="/media/castercycle.png" alt="" width={34} height={34} className="cc-brand-icon h-[34px] w-[34px] rounded-md border border-white/12 object-cover" />
-            <div className="min-w-0">
-              <div className="cc-brand-title flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.14em] text-[#fbe764]">
-                CasterCycle
-                <span className="h-1.5 w-1.5 rounded-full bg-[#a2ff9a] shadow-[0_0_12px_rgba(162,255,154,0.9)]" />
+            <button
+              aria-label="Go to Play home"
+              className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-md pr-1 text-left transition active:scale-[0.98]"
+              onClick={goHome}
+            >
+              <Image src="/media/castercycle.png" alt="" width={34} height={34} className="cc-brand-icon h-[34px] w-[34px] rounded-md border border-white/12 object-cover" />
+              <div className="min-w-0">
+                <div className="cc-brand-title flex items-center gap-2 text-[11px] font-black uppercase tracking-[0.14em] text-[#fbe764]">
+                  CasterCycle
+                  <Home size={12} className="text-white/38" />
+                </div>
+                <div className="cc-brand-subtitle truncate text-[10px] font-semibold text-white/70">
+                  {freeRideActive ? freeRideHud.zone : game.route.name}
+                </div>
               </div>
-              <div className="cc-brand-subtitle truncate text-[10px] font-semibold text-white/70">
-                {freeRideActive ? `${freeRideHud.zone} - tap anywhere to steer` : `${game.route.name} - ${game.route.tagline}`}
-              </div>
-            </div>
-          </div>
+            </button>
             <div className="flex shrink-0 items-center gap-1.5 text-[11px] font-bold">
-            <span className="cc-hud-pill flex min-w-[58px] items-center justify-center gap-1 rounded-md border border-white/10 bg-white/8 px-2 py-1.5">
-              <Trophy size={13} className="text-[#fbe764]" />
+              <span className="cc-hud-pill flex min-w-[58px] items-center justify-center gap-1 rounded-md border border-white/10 bg-white/8 px-2 py-1.5">
+                <Trophy size={13} className="text-[#fbe764]" />
                 {freeRideActive ? Math.round(freeRideHud.score).toLocaleString() : hud.score.toLocaleString()}
-            </span>
-            <span className="cc-hud-pill flex min-w-[48px] items-center justify-center gap-1 rounded-md border border-white/10 bg-white/8 px-2 py-1.5">
-              <BatteryCharging size={13} className="text-[#a2ff9a]" />
-              {freeRideActive ? (freeRideHud.unlimited ? "all" : `${Math.ceil(freeRideHud.remaining)}s`) : `${Math.round(hud.battery)}%`}
-            </span>
-            <button
-              aria-label={audioEnabled ? "Turn sound effects off" : "Turn sound effects on"}
-              className={`cc-audio-button pointer-events-auto relative inline-flex h-8 w-8 items-center justify-center rounded-md border ${audioEnabled ? "border-[#fbe764]/60 bg-[#fbe764]/18 text-[#fbe764]" : "border-white/12 bg-white/8 text-white/55"}`}
-              onClick={toggleAudio}
-            >
-              {audioEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
-              <span className={`absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ${audioEnabled ? "bg-[#fbe764] shadow-[0_0_10px_rgba(251,231,100,0.95)]" : "bg-white/22"}`} />
-            </button>
-            <button
-              aria-label={voiceEnabled ? "Turn route voice off" : "Turn route voice on"}
-              className={`cc-audio-button pointer-events-auto relative inline-flex h-8 w-8 items-center justify-center rounded-md border ${voiceEnabled ? "border-[#7cf2ff]/60 bg-[#7cf2ff]/18 text-[#7cf2ff]" : "border-white/12 bg-white/8 text-white/55"}`}
-              onClick={toggleVoice}
-            >
-              <Radio size={14} />
-              <span className={`absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ${voiceEnabled ? "bg-[#7cf2ff] shadow-[0_0_10px_rgba(124,242,255,0.95)]" : "bg-white/22"}`} />
-            </button>
+              </span>
+              <span className="cc-hud-pill flex min-w-[48px] items-center justify-center gap-1 rounded-md border border-white/10 bg-white/8 px-2 py-1.5">
+                <BatteryCharging size={13} className="text-[#a2ff9a]" />
+                {freeRideActive ? (freeRideHud.unlimited ? "all" : `${Math.ceil(freeRideHud.remaining)}s`) : `${Math.round(hud.battery)}%`}
+              </span>
+              <button
+                aria-label="Open rider profile settings"
+                aria-expanded={profileOpen}
+                className={`pointer-events-auto relative inline-flex h-9 w-9 items-center justify-center rounded-md border transition active:scale-[0.98] ${
+                  profileOpen ? "border-[#7cf2ff]/70 bg-[#7cf2ff]/16" : "border-white/12 bg-white/8"
+                }`}
+                onClick={() => {
+                  haptic("selection");
+                  setProfileOpen((open) => !open);
+                }}
+              >
+                <ProfileAvatar src={user?.pfpUrl} username={user?.username} displayName={user?.displayName} className="h-7 w-7 rounded" />
+                <span className={`absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full ${effectivePro ? "bg-[#fbe764] shadow-[0_0_10px_rgba(251,231,100,0.95)]" : "bg-white/24"}`} />
+              </button>
             </div>
           </div>
         </div>
+        {profileOpen && (
+          <ProfileSettingsPopover
+            user={user}
+            displayName={displayName}
+            score={freeRideActive ? Math.round(freeRideHud.score) : hud.score}
+            bestAll={stats.bestAll}
+            streak={stats.streak}
+            accessLabel={accessLabel}
+            proActive={effectivePro}
+            dayActive={dayActive}
+            annualActive={annualActive}
+            audioEnabled={audioEnabled}
+            voiceEnabled={voiceEnabled}
+            hapticsEnabled={hapticsEnabled}
+            address={address}
+            selectedSkin={skin}
+            receipts={passReceipts}
+            themeMode={themeMode}
+            resolvedTheme={resolvedTheme}
+            onClose={() => setProfileOpen(false)}
+            onThemeMode={(mode) => {
+              setThemeMode(mode);
+              haptic("selection");
+            }}
+            onToggleAudio={toggleAudio}
+            onToggleVoice={toggleVoice}
+            onToggleHaptics={() => {
+              setToast(hapticsEnabled ? "Haptics ready" : "Haptics unavailable here");
+              haptic("selection");
+            }}
+            onConnect={connectWallet}
+            onGarage={() => {
+              setProfileOpen(false);
+              setDashboardTab("garage");
+            }}
+            onPassport={() => {
+              setProfileOpen(false);
+              setDashboardTab("shop");
+            }}
+            onHome={goHome}
+          />
+        )}
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/25 shadow-[0_8px_24px_rgba(0,0,0,0.24)]">
           <div
             className="h-full rounded-full bg-gradient-to-r from-[#7cf2ff] via-[#fbe764] to-[#a2ff9a]"
@@ -2559,78 +2680,73 @@ export default function CasterCycleApp() {
       {freeRideActive && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 px-3">
           <ObjectiveStrip objectives={freeRideHud.objectives} />
-          <div className="grid grid-cols-4 gap-2">
+          <div className="pointer-events-auto grid grid-cols-[1fr_1.35fr_1fr_0.8fr] gap-2">
+            <button aria-label="Turn left" className="inline-flex min-h-14 items-center justify-center rounded-md border border-white/18 bg-black/36 px-1 text-white/88 shadow-[0_14px_34px_rgba(0,0,0,0.24)] backdrop-blur-md active:scale-[0.98]" onClick={() => changeLane(-1)}>
+              <ChevronLeft size={30} />
+            </button>
+            <button aria-label="Pedal faster" className="inline-flex min-h-14 items-center justify-center gap-1 rounded-md border border-[#fbe764]/55 bg-[#fbe764]/20 px-2 text-[11px] font-black uppercase tracking-[0.04em] text-[#fbe764] shadow-[0_14px_34px_rgba(251,231,100,0.12)] backdrop-blur-md active:scale-[0.98]" onClick={boostOrHop}>
+              <Zap size={20} />
+              Pedal
+            </button>
+            <button aria-label="Turn right" className="inline-flex min-h-14 items-center justify-center rounded-md border border-white/18 bg-black/36 px-1 text-white/88 shadow-[0_14px_34px_rgba(0,0,0,0.24)] backdrop-blur-md active:scale-[0.98]" onClick={() => changeLane(1)}>
+              <ChevronRight size={30} />
+            </button>
+            <button aria-label="Exit to park menu" className="inline-flex min-h-14 items-center justify-center rounded-md border border-[#ff5d73]/45 bg-[#ff5d73]/18 px-1 text-white shadow-[0_14px_34px_rgba(0,0,0,0.18)] backdrop-blur-md active:scale-[0.98]" onClick={() => stopFreeRide(false)}>
+              <Map size={19} />
+            </button>
+          </div>
+          <div className="mt-2 grid grid-cols-4 gap-2">
             <Metric icon={<Gauge size={14} />} label="mph" value={String(Math.round(freeRideHud.speed / 11))} />
             <Metric icon={<Trophy size={14} />} label="score" value={Math.round(freeRideHud.score).toLocaleString()} />
             <Metric icon={<Flame size={14} />} label="combo" value={`${freeRideHud.combo}x`} />
             <Metric icon={<Map size={14} />} label="surface" value={freeRideHud.terrain} />
-          </div>
-          <div className="pointer-events-auto mt-2 grid grid-cols-[0.8fr_1.4fr_0.8fr_1fr] gap-2">
-            <button aria-label="Turn left" className="inline-flex min-h-11 items-center justify-center rounded-md border border-white/18 bg-black/32 px-1 text-white/80 backdrop-blur-md active:scale-[0.98]" onClick={() => changeLane(-1)}>
-              <ChevronLeft size={22} />
-            </button>
-            <button aria-label="Pedal faster" className="inline-flex min-h-11 items-center justify-center gap-0.5 rounded-md border border-[#fbe764]/50 bg-[#fbe764]/18 px-1 text-[10px] font-black uppercase tracking-[0.04em] text-[#fbe764] backdrop-blur-md active:scale-[0.98]" onClick={boostOrHop}>
-              <Zap size={16} />
-              Pedal
-            </button>
-            <button aria-label="Turn right" className="inline-flex min-h-11 items-center justify-center rounded-md border border-white/18 bg-black/32 px-1 text-white/80 backdrop-blur-md active:scale-[0.98]" onClick={() => changeLane(1)}>
-              <ChevronRight size={22} />
-            </button>
-            <button aria-label="Exit to park menu" className="inline-flex min-h-11 items-center justify-center gap-1 rounded-md border border-[#ff5d73]/45 bg-[#ff5d73]/18 px-1 text-[10px] font-black uppercase tracking-[0.04em] text-white backdrop-blur-md active:scale-[0.98]" onClick={() => stopFreeRide(false)}>
-              <Map size={14} />
-              Park
-            </button>
           </div>
         </div>
       )}
 
       {!freeRideActive && hud.phase === "riding" && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 px-3">
-          <div className="grid grid-cols-4 gap-2">
-            <Metric icon={<Gauge size={14} />} label="mph" value={String(Math.round(hud.speed / 8))} />
-            <Metric icon={<Zap size={14} />} label="bolts" value={String(hud.pickups)} />
-            <Metric icon={<Flame size={14} />} label="combo" value={`${hud.combo}x`} />
-            <Metric icon={<Bike size={14} />} label="lane" value={hud.targetLane === -1 ? "left" : hud.targetLane === 1 ? "right" : "mid"} />
-          </div>
-          <div className="pointer-events-auto mt-2 grid grid-cols-[0.9fr_1.1fr_0.9fr_1fr] gap-2">
+          <div className="pointer-events-auto grid grid-cols-[1fr_1.25fr_1fr_0.8fr] gap-2">
             <button
               aria-label="Move left"
               aria-pressed={hud.targetLane === -1}
-              className={`inline-flex min-h-11 select-none items-center justify-center gap-1 rounded-md border text-[10px] font-black uppercase tracking-[0.04em] backdrop-blur-md touch-manipulation active:scale-[0.98] ${
-                hud.targetLane === -1 ? "border-[#7cf2ff]/65 bg-[#7cf2ff]/18 text-[#7cf2ff]" : "border-white/18 bg-black/32 text-white/80"
+              className={`inline-flex min-h-14 select-none items-center justify-center rounded-md border shadow-[0_14px_34px_rgba(0,0,0,0.24)] backdrop-blur-md touch-manipulation active:scale-[0.98] ${
+                hud.targetLane === -1 ? "border-[#7cf2ff]/65 bg-[#7cf2ff]/20 text-[#7cf2ff]" : "border-white/18 bg-black/36 text-white/88"
               }`}
               onClick={() => changeLane(-1)}
             >
-              <ChevronLeft size={18} />
-              Left
+              <ChevronLeft size={30} />
             </button>
             <button
-              aria-label="Hop"
-              className="inline-flex min-h-11 select-none items-center justify-center gap-1 rounded-md border border-[#fbe764]/50 bg-[#fbe764]/18 text-[10px] font-black uppercase tracking-[0.04em] text-[#fbe764] backdrop-blur-md touch-manipulation active:scale-[0.98]"
+              aria-label="Boost hop"
+              className="inline-flex min-h-14 select-none items-center justify-center rounded-md border border-[#fbe764]/55 bg-[#fbe764]/20 text-[#fbe764] shadow-[0_14px_34px_rgba(251,231,100,0.12)] backdrop-blur-md touch-manipulation active:scale-[0.98]"
               onClick={boostOrHop}
             >
-              <Zap size={16} />
-              Hop
+              <Zap size={24} />
             </button>
             <button
               aria-label="Move right"
               aria-pressed={hud.targetLane === 1}
-              className={`inline-flex min-h-11 select-none items-center justify-center gap-1 rounded-md border text-[10px] font-black uppercase tracking-[0.04em] backdrop-blur-md touch-manipulation active:scale-[0.98] ${
-                hud.targetLane === 1 ? "border-[#7cf2ff]/65 bg-[#7cf2ff]/18 text-[#7cf2ff]" : "border-white/18 bg-black/32 text-white/80"
+              className={`inline-flex min-h-14 select-none items-center justify-center rounded-md border shadow-[0_14px_34px_rgba(0,0,0,0.24)] backdrop-blur-md touch-manipulation active:scale-[0.98] ${
+                hud.targetLane === 1 ? "border-[#7cf2ff]/65 bg-[#7cf2ff]/20 text-[#7cf2ff]" : "border-white/18 bg-black/36 text-white/88"
               }`}
               onClick={() => changeLane(1)}
             >
-              Right
-              <ChevronRight size={18} />
+              <ChevronRight size={30} />
             </button>
             <button
               aria-label="Exit to Play menu"
-              className="inline-flex min-h-11 select-none items-center justify-center gap-1 rounded-md border border-[#ff5d73]/45 bg-[#ff5d73]/18 px-1 text-[10px] font-black uppercase tracking-[0.04em] text-white backdrop-blur-md touch-manipulation active:scale-[0.98]"
+              className="inline-flex min-h-14 select-none items-center justify-center rounded-md border border-[#ff5d73]/45 bg-[#ff5d73]/18 px-1 text-white shadow-[0_14px_34px_rgba(0,0,0,0.18)] backdrop-blur-md touch-manipulation active:scale-[0.98]"
               onClick={exitDashToMenu}
             >
-              <Map size={14} />
-              Park
+              <Map size={19} />
             </button>
+          </div>
+          <div className="mt-2 grid grid-cols-4 gap-2">
+            <Metric icon={<Gauge size={14} />} label="mph" value={String(Math.round(hud.speed / 8))} />
+            <Metric icon={<Zap size={14} />} label="bolts" value={String(hud.pickups)} />
+            <Metric icon={<Flame size={14} />} label="combo" value={`${hud.combo}x`} />
+            <Metric icon={<Bike size={14} />} label="lane" value={hud.targetLane === -1 ? "left" : hud.targetLane === 1 ? "right" : "mid"} />
           </div>
         </div>
       )}
@@ -2657,7 +2773,6 @@ export default function CasterCycleApp() {
                 displayName={displayName}
                 routeName={game.route.name}
                 onAdd={addMiniApp}
-                onDismiss={() => setShowWelcomeBack(false)}
                 onShare={shareApp}
                 onStart={startRide}
                 onRoam={startFreeRide}
@@ -2692,14 +2807,6 @@ export default function CasterCycleApp() {
                       proActive={effectivePro}
                       onShop={() => setDashboardTab("shop")}
                       onPreview={() => startFreeRide({ area: effectivePro ? "skyline" : "bikeLand", preview: !effectivePro })}
-                    />
-
-                    <DashboardRangerCard
-                      onQuest={() => {
-                        haptic("selection");
-                        setDashboardTab("quest");
-                      }}
-                      onDeal={() => openExternal(KINGBULL_RANGER_URL)}
                     />
 
                     {lastRecap && (
@@ -2830,6 +2937,225 @@ export default function CasterCycleApp() {
         </div>
       )}
     </main>
+  );
+}
+
+function ProfileSettingsPopover({
+  user,
+  displayName,
+  score,
+  bestAll,
+  streak,
+  accessLabel,
+  proActive,
+  dayActive,
+  annualActive,
+  audioEnabled,
+  voiceEnabled,
+  hapticsEnabled,
+  address,
+  selectedSkin,
+  receipts,
+  themeMode,
+  resolvedTheme,
+  onClose,
+  onThemeMode,
+  onToggleAudio,
+  onToggleVoice,
+  onToggleHaptics,
+  onConnect,
+  onGarage,
+  onPassport,
+  onHome,
+}: {
+  user?: { fid?: number; username?: string; displayName?: string; pfpUrl?: string } | null;
+  displayName: string;
+  score: number;
+  bestAll: number;
+  streak: number;
+  accessLabel: string;
+  proActive: boolean;
+  dayActive: boolean;
+  annualActive: boolean;
+  audioEnabled: boolean;
+  voiceEnabled: boolean;
+  hapticsEnabled: boolean;
+  address?: `0x${string}`;
+  selectedSkin: Skin;
+  receipts: PassReceipt[];
+  themeMode: ThemeMode;
+  resolvedTheme: ReturnType<typeof resolveThemeMode>;
+  onClose: () => void;
+  onThemeMode: (mode: ThemeMode) => void;
+  onToggleAudio: () => void;
+  onToggleVoice: () => void;
+  onToggleHaptics: () => void;
+  onConnect: () => void;
+  onGarage: () => void;
+  onPassport: () => void;
+  onHome: () => void;
+}) {
+  const passTitle = annualActive ? "Lifetime pass" : dayActive ? "Day pass" : proActive ? "Premium pass" : "Free rider";
+  const tokenStatus = address ? shortAddress(address) : "Wallet off";
+  const lastReceipt = receipts[0];
+
+  return (
+    <div className="cc-themed-popover no-scrollbar pointer-events-auto absolute right-3 top-[4.25rem] z-50 max-h-[calc(100dvh-5.25rem)] w-[min(23rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-md border backdrop-blur-2xl">
+      <div className="flex items-start justify-between gap-3 border-b border-white/10 p-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <ProfileAvatar src={user?.pfpUrl} username={user?.username} displayName={user?.displayName} className="h-12 w-12 rounded-md" />
+          <div className="min-w-0">
+            <div className="truncate text-base font-black leading-tight text-white">{user?.displayName || displayName}</div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] font-black uppercase tracking-[0.08em] text-white/48">
+              <UserRound size={12} />
+              <span className="truncate">{user?.username ? `@${user.username}` : user?.fid ? `fid:${user.fid}` : "local rider"}</span>
+            </div>
+          </div>
+        </div>
+        <button
+          aria-label="Close profile settings"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-white/12 bg-white/8 text-white/64 active:scale-[0.98]"
+          onClick={onClose}
+        >
+          <X size={15} />
+        </button>
+      </div>
+
+      <div className="p-3">
+        <div className="grid grid-cols-3 gap-1.5">
+          <ProfileStat label="score" value={score.toLocaleString()} accent="#fbe764" />
+          <ProfileStat label="best" value={bestAll.toLocaleString()} accent="#7cf2ff" />
+          <ProfileStat label="streak" value={`${Math.min(7, Math.max(0, streak))}/7`} accent="#a2ff9a" />
+        </div>
+
+        <div className="mt-2 rounded-md border border-[#fbe764]/28 bg-[#fbe764]/10 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.14em] text-[#fbe764]">
+                <Crown size={13} />
+                {passTitle}
+              </div>
+              <div className="mt-1 truncate text-sm font-black text-white">{accessLabel}</div>
+            </div>
+            <button className="min-h-9 shrink-0 rounded-md bg-[#fbe764] px-3 text-[10px] font-black uppercase text-[#071018] active:scale-[0.98]" onClick={onPassport}>
+              Passport
+            </button>
+          </div>
+          <div className="mt-2 grid grid-cols-3 gap-1.5">
+            <TokenInfo label="token" value="USDC" />
+            <TokenInfo label="network" value="Base" />
+            <TokenInfo label="wallet" value={tokenStatus} />
+          </div>
+          {lastReceipt && (
+            <div className="mt-2 truncate rounded-md border border-white/10 bg-black/18 px-2 py-1.5 text-[10px] font-bold uppercase tracking-[0.06em] text-white/48">
+              Last {lastReceipt.txLabel}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-2 grid grid-cols-2 gap-1.5">
+          <ProfileToggle icon={audioEnabled ? <Volume2 size={15} /> : <VolumeX size={15} />} label="Sound" enabled={audioEnabled} onClick={onToggleAudio} />
+          <ProfileToggle icon={<Radio size={15} />} label="Voice" enabled={voiceEnabled} onClick={onToggleVoice} />
+          <ProfileToggle icon={<Settings size={15} />} label="Haptics" enabled={hapticsEnabled} onClick={onToggleHaptics} />
+          <button className="min-h-11 rounded-md border border-white/12 bg-white/8 px-3 text-left active:scale-[0.98]" onClick={onGarage}>
+            <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.08em] text-[#a2ff9a]">
+              <Bike size={15} />
+              Bike
+            </span>
+            <span className="mt-1 block truncate text-xs font-black text-white">{selectedSkin.name}</span>
+          </button>
+        </div>
+
+        <ThemeModePicker selected={themeMode} resolved={resolvedTheme} onSelect={onThemeMode} />
+
+        <div className="mt-2 grid grid-cols-2 gap-1.5">
+          <button className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-[#7cf2ff]/35 bg-[#7cf2ff]/13 px-3 text-xs font-black text-white active:scale-[0.98]" onClick={onConnect}>
+            <Wallet size={15} />
+            {address ? "Wallet" : "Connect"}
+          </button>
+          <button className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-white/12 bg-white/8 px-3 text-xs font-black text-white active:scale-[0.98]" onClick={onHome}>
+            <Home size={15} />
+            Home
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProfileStat({ label, value, accent }: { label: string; value: string; accent: string }) {
+  return (
+    <div className="rounded-md border border-white/10 bg-white/8 px-2 py-2">
+      <div className="text-[8px] font-black uppercase tracking-[0.1em] text-white/38">{label}</div>
+      <div className="mt-1 truncate text-sm font-black leading-tight" style={{ color: accent }}>{value}</div>
+    </div>
+  );
+}
+
+function TokenInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-md border border-white/10 bg-black/18 px-2 py-1.5">
+      <div className="text-[8px] font-black uppercase tracking-[0.08em] text-white/36">{label}</div>
+      <div className="mt-0.5 truncate text-[10px] font-black text-white">{value}</div>
+    </div>
+  );
+}
+
+function ThemeModePicker({ selected, resolved, onSelect }: { selected: ThemeMode; resolved: ReturnType<typeof resolveThemeMode>; onSelect: (mode: ThemeMode) => void }) {
+  const modes: Array<{ id: ThemeMode; label: string; tone: string }> = [
+    { id: "system", label: "System", tone: resolved === "light" ? "#071018" : "#f8fbff" },
+    { id: "light", label: "Light", tone: "#f8fbff" },
+    { id: "dark", label: "Dark", tone: "#071018" },
+    { id: "custom", label: "Custom", tone: "linear-gradient(135deg,#ff7adf,#7cf2ff)" },
+  ];
+
+  return (
+    <div className="mt-2 rounded-md border border-white/12 bg-white/8 p-2">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.12em] text-white/46">
+          <Settings size={13} />
+          Theme
+        </div>
+        <div className="text-[9px] font-black uppercase tracking-[0.1em] text-white/38">{resolved}</div>
+      </div>
+      <div className="grid grid-cols-4 gap-1.5">
+        {modes.map((mode) => {
+          const active = selected === mode.id;
+          return (
+            <button
+              key={mode.id}
+              aria-pressed={active}
+              className={`min-h-12 rounded-md border px-1.5 py-1 text-center active:scale-[0.98] ${
+                active ? "border-[#fbe764]/70 bg-[#fbe764]/14" : "border-white/10 bg-black/14"
+              }`}
+              onClick={() => onSelect(mode.id)}
+            >
+              <span className="mx-auto block h-4 w-4 rounded-full border border-white/18" style={{ background: mode.tone }} />
+              <span className="mt-1 block truncate text-[9px] font-black uppercase tracking-normal text-white/70">{mode.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ProfileToggle({ icon, label, enabled, onClick }: { icon: React.ReactNode; label: string; enabled: boolean; onClick: () => void }) {
+  return (
+    <button
+      className={`flex min-h-11 items-center justify-between gap-2 rounded-md border px-3 text-left active:scale-[0.98] ${
+        enabled ? "border-[#7cf2ff]/50 bg-[#7cf2ff]/14" : "border-white/12 bg-white/8"
+      }`}
+      onClick={onClick}
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <span className={enabled ? "text-[#7cf2ff]" : "text-white/48"}>{icon}</span>
+        <span className="truncate text-xs font-black text-white">{label}</span>
+      </span>
+      <span className={`h-5 w-9 rounded-full p-0.5 transition ${enabled ? "bg-[#7cf2ff]" : "bg-white/16"}`}>
+        <span className={`block h-4 w-4 rounded-full bg-white transition ${enabled ? "translate-x-4" : ""}`} />
+      </span>
+    </button>
   );
 }
 
@@ -2965,7 +3291,6 @@ function WelcomeBackPanel({
   displayName,
   routeName,
   onAdd,
-  onDismiss,
   onShare,
   onStart,
   onRoam,
@@ -2973,7 +3298,6 @@ function WelcomeBackPanel({
   displayName: string;
   routeName: string;
   onAdd: () => void;
-  onDismiss: () => void;
   onShare: () => void;
   onStart: () => void;
   onRoam: () => void;
@@ -3040,15 +3364,6 @@ function WelcomeBackPanel({
           Add app
         </button>
       </div>
-      <button
-        className="mt-3 min-h-9 w-full rounded-md border border-white/12 bg-white/7 px-3 text-xs font-black uppercase tracking-[0.1em] text-white/58"
-        onClick={() => {
-          haptic("selection");
-          onDismiss();
-        }}
-      >
-        Not now
-      </button>
     </div>
   );
 }
@@ -3056,8 +3371,8 @@ function WelcomeBackPanel({
 function dashboardMeta(tab: DashboardTab) {
   if (tab === "shop") return { title: "Passport", kicker: "premium access", detail: "Stamps, missions, pass, and receipts.", accent: "#35f6c8", icon: <Wallet size={18} /> };
   if (tab === "garage") return { title: "World", kicker: "map + bike", detail: "Choose the park, target spot, and skin.", accent: "#a2ff9a", icon: <Map size={18} /> };
-  if (tab === "club") return { title: "Club", kicker: "paid lounge", detail: "Garage lounge, clean chat, social riders.", accent: "#c4b5fd", icon: <Users size={18} /> };
-  if (tab === "quest") return { title: "Fan", kicker: "side quest", detail: "Kingbull Ranger fan garage and videos.", accent: "#ff9ec7", icon: <Sparkles size={18} /> };
+  if (tab === "club") return { title: "Club", kicker: "rider lounge", detail: "Clean chat for pass riders.", accent: "#c4b5fd", icon: <Users size={18} /> };
+  if (tab === "quest") return { title: "Fan", kicker: "Ranger guide", detail: "Organized fan info, links, and videos.", accent: "#ff9ec7", icon: <Sparkles size={18} /> };
   if (tab === "leaders") return { title: "Rank", kicker: "leaderboard", detail: "Daily and weekly Farcaster challenges.", accent: "#fbe764", icon: <Trophy size={18} /> };
   return { title: "Play", kicker: "ride now", detail: "Daily Dash, free roam, and premium worlds.", accent: "#7cf2ff", icon: <Play size={18} /> };
 }
@@ -3084,9 +3399,11 @@ function DashboardHeader({
             {meta.kicker}
           </div>
           <h1 className="cc-dashboard-title mt-1 truncate text-2xl font-black leading-none tracking-normal text-white">{meta.title}</h1>
-          <p className="cc-dashboard-detail mt-1 truncate text-sm font-semibold leading-5 text-white/62">
-            {finished ? `${score.toLocaleString()} on ${routeName}` : meta.detail}
-          </p>
+          {finished && (
+            <p className="cc-dashboard-detail mt-1 truncate text-sm font-semibold leading-5 text-white/62">
+              {score.toLocaleString()} on {routeName}
+            </p>
+          )}
         </div>
         <Image
           src="/media/castercycle.png"
@@ -3112,7 +3429,7 @@ function DashboardNav({ active, onSelect }: { active: DashboardTab; onSelect: (t
 
   return (
     <nav className="cc-footer-nav pointer-events-auto absolute inset-x-0 bottom-0 z-30 px-3 pb-3" aria-label="App navigation">
-      <div className="rounded-md border border-white/35 bg-[#f8fbff]/90 p-1.5 shadow-[0_-18px_52px_rgba(0,0,0,0.36)] backdrop-blur-2xl">
+      <div className="cc-footer-surface rounded-md border p-1.5 backdrop-blur-2xl">
         <div className="grid grid-cols-6 gap-1">
         {tabs.map((item) => {
           const selected = active === item.id;
@@ -3121,12 +3438,11 @@ function DashboardNav({ active, onSelect }: { active: DashboardTab; onSelect: (t
             <button
               key={item.id}
               aria-current={selected ? "page" : undefined}
-              className={`cc-nav-button flex min-h-[50px] flex-col items-center justify-center gap-1 rounded-md px-1 text-center transition active:scale-[0.98] ${
-                selected ? "bg-[#071018] text-white shadow-[0_10px_24px_rgba(7,16,24,0.22)]" : "text-[#071018]/58"
-              }`}
+              data-active={selected ? "true" : "false"}
+              className="cc-nav-button flex min-h-[50px] flex-col items-center justify-center gap-1 rounded-md px-1 text-center transition active:scale-[0.98]"
               onClick={() => onSelect(item.id)}
             >
-              <span style={{ color: selected ? meta.accent : "rgba(7,16,24,0.62)" }}>{item.icon}</span>
+              <span className="cc-nav-icon" style={{ color: selected ? meta.accent : undefined }}>{item.icon}</span>
               <span className="cc-nav-label block max-w-full truncate text-[9px] font-black leading-none tracking-normal">{item.label}</span>
             </button>
           );
@@ -3168,76 +3484,94 @@ function WorldHub({
   const activeRun = phase === "riding" || phase === "finished";
 
   return (
-    <div className="cc-world-hub mt-4">
-      <div className="cc-today-card rounded-md border border-white/10 bg-white/[0.05] p-3">
-        <div className="min-w-0">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-[#7cf2ff]">Today</div>
-              <div className="mt-1 truncate text-xl font-black leading-tight text-white">Pick a ride</div>
+    <div className="cc-world-hub mt-3">
+      <div className="cc-today-card overflow-hidden rounded-md border border-white/10 bg-[linear-gradient(135deg,rgba(124,242,255,0.14),rgba(162,255,154,0.10)_55%,rgba(251,231,100,0.08))] p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-[#7cf2ff] text-[#071018] shadow-[0_12px_30px_rgba(124,242,255,0.18)]">
+              <Target size={22} />
             </div>
-            <div className="shrink-0 rounded-md border border-[#fbe764]/30 bg-[#fbe764]/12 px-2 py-1 text-right">
-              <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#fbe764]">score</div>
-              <div className="text-sm font-black text-white">{score.toLocaleString()}</div>
+            <div className="min-w-0">
+              <div className="truncate text-lg font-black leading-tight text-white">{event.title}</div>
+              <div className="mt-1 flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: event.color }} />
+                <span className="truncate text-[11px] font-black uppercase tracking-[0.08em] text-white/58">{event.spot}</span>
+              </div>
             </div>
           </div>
-          <div className="mt-2 truncate text-xs font-semibold text-white/58">{event.title} at {event.spot}</div>
+          <div className="shrink-0 rounded-md border border-[#fbe764]/30 bg-[#fbe764]/12 px-2 py-1 text-right">
+            <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#fbe764]">score</div>
+            <div className="text-sm font-black text-white">{score.toLocaleString()}</div>
+          </div>
         </div>
       </div>
 
       <div className="cc-ride-actions mt-3 grid grid-cols-2 gap-2">
         <button
           aria-label="Start free roam"
-          className="cc-ride-card min-h-[116px] rounded-md border border-[#a2ff9a]/35 bg-[#a2ff9a]/12 p-3 text-left shadow-[0_18px_40px_rgba(162,255,154,0.08)] active:scale-[0.98]"
+          className="cc-ride-card group relative min-h-[132px] overflow-hidden rounded-md border border-[#a2ff9a]/35 bg-[#a2ff9a]/12 p-3 text-left shadow-[0_18px_40px_rgba(162,255,154,0.08)] active:scale-[0.98]"
           onClick={onFreeRide}
         >
-          <span className="flex h-9 w-9 items-center justify-center rounded-md bg-[#a2ff9a] text-[#071018]">
-            <Bike size={18} />
+          <span className="absolute -right-7 -top-7 h-24 w-24 rounded-full border border-[#a2ff9a]/25 bg-[#a2ff9a]/10" />
+          <span className="relative flex h-12 w-12 items-center justify-center rounded-md bg-[#a2ff9a] text-[#071018] shadow-[0_10px_24px_rgba(162,255,154,0.18)]">
+            <Bike size={23} />
           </span>
-          <span className="cc-ride-title mt-3 block text-base font-black leading-tight text-white">Roam</span>
-          <span className="cc-compact-detail mt-1 block text-xs font-semibold leading-4 text-white/58">Open park. Any direction.</span>
+          <span className="cc-ride-title relative mt-4 block text-2xl font-black leading-none text-white">Roam</span>
+          <span className="relative mt-3 flex gap-1.5">
+            {["park", "flow", "30s"].map((label) => (
+              <span key={label} className="rounded border border-white/10 bg-black/18 px-1.5 py-1 text-[9px] font-black uppercase tracking-[0.06em] text-white/54">
+                {label}
+              </span>
+            ))}
+          </span>
         </button>
         <button
           aria-label="Start Daily Dash"
-          className="cc-ride-card min-h-[116px] rounded-md border border-[#7cf2ff]/35 bg-[#7cf2ff]/12 p-3 text-left shadow-[0_18px_40px_rgba(124,242,255,0.08)] active:scale-[0.98]"
+          className="cc-ride-card group relative min-h-[132px] overflow-hidden rounded-md border border-[#7cf2ff]/35 bg-[#7cf2ff]/12 p-3 text-left shadow-[0_18px_40px_rgba(124,242,255,0.08)] active:scale-[0.98]"
           onClick={onStart}
         >
-          <span className="flex h-9 w-9 items-center justify-center rounded-md bg-[#7cf2ff] text-[#071018]">
-            <Play size={18} />
+          <span className="absolute -right-7 -top-7 h-24 w-24 rounded-full border border-[#7cf2ff]/25 bg-[#7cf2ff]/10" />
+          <span className="relative flex h-12 w-12 items-center justify-center rounded-md bg-[#7cf2ff] text-[#071018] shadow-[0_10px_24px_rgba(124,242,255,0.18)]">
+            <Play size={23} fill="currentColor" />
           </span>
-          <span className="cc-ride-title mt-3 block text-base font-black leading-tight text-white">Dash</span>
-          <span className="cc-compact-detail mt-1 block text-xs font-semibold leading-4 text-white/55">Daily score run.</span>
+          <span className="cc-ride-title relative mt-4 block text-2xl font-black leading-none text-white">Dash</span>
+          <span className="relative mt-3 flex gap-1.5">
+            {["lane", "boost", "rank"].map((label) => (
+              <span key={label} className="rounded border border-white/10 bg-black/18 px-1.5 py-1 text-[9px] font-black uppercase tracking-[0.06em] text-white/54">
+                {label}
+              </span>
+            ))}
+          </span>
         </button>
       </div>
 
-      <div className="cc-score-strip mt-2 grid grid-cols-3 gap-2">
+      <div className="cc-score-strip mt-2 grid grid-cols-3 gap-1.5">
         <ResultStat label="best" value={bestAll.toLocaleString()} />
         <ResultStat label="today" value={bestToday.toLocaleString()} />
         <ResultStat label="streak" value={`${Math.min(7, Math.max(0, streak))}/7`} />
       </div>
 
-      <div className="cc-access-row mt-2 flex min-h-11 items-center justify-between gap-3 rounded-md border border-white/10 bg-black/20 px-3">
+      <div className="cc-access-row mt-2 flex min-h-10 items-center justify-between gap-3 rounded-md border border-white/10 bg-black/20 px-3">
         <div className="min-w-0">
-          <div className="text-[9px] font-black uppercase tracking-[0.14em] text-white/42">access</div>
           <div className="truncate text-sm font-black text-white">{accessLabel}</div>
         </div>
         <button
-          className="inline-flex min-h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-white/12 bg-white/8 px-3 text-[10px] font-black uppercase tracking-[0.08em] text-white"
+          aria-label="Open pass"
+          className="inline-flex min-h-8 shrink-0 items-center justify-center rounded-md border border-white/12 bg-white/8 px-2 text-white"
           onClick={onShop}
         >
           <Crown size={13} />
-          Pass
         </button>
       </div>
 
       {!proActive && (
         <button
-          className="mt-2 flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-[#fbe764]/35 bg-[#fbe764]/12 px-3 text-left active:scale-[0.99]"
+          aria-label="Open Cycle Pass"
+          className="mt-2 flex min-h-10 w-full items-center justify-between gap-3 rounded-md border border-[#fbe764]/35 bg-[#fbe764]/12 px-3 text-left active:scale-[0.99]"
           onClick={onShop}
         >
           <span className="min-w-0">
-            <span className="block text-[9px] font-black uppercase tracking-[0.14em] text-[#fbe764]">Cycle Pass</span>
-            <span className="block truncate text-sm font-black text-white">$1 day or $7 lifetime unlimited</span>
+            <span className="block truncate text-sm font-black text-white">Cycle Pass</span>
           </span>
           <Crown size={17} className="shrink-0 text-[#fbe764]" />
         </button>
@@ -3250,31 +3584,7 @@ function WorldHub({
           onClick={onShare}
         >
           <Share2 size={18} />
-          {sharing ? "Opening" : activeRun ? "Share ride" : "Invite friends"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function DashboardRangerCard({ onQuest, onDeal }: { onQuest: () => void; onDeal: () => void }) {
-  return (
-    <div className="mt-3 rounded-md border border-[#fbe764]/24 bg-[#fbe764]/10 p-3">
-      <div className="flex items-center justify-between gap-3">
-        <button className="min-w-0 flex-1 text-left active:scale-[0.99]" onClick={onQuest}>
-          <span className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#fbe764]">
-            <Sparkles size={13} />
-            side quest
-          </span>
-          <span className="mt-1 block truncate text-sm font-black text-white">Kingbull Ranger Fan Garage</span>
-          <span className="mt-0.5 block truncate text-[11px] font-semibold text-white/54">$799 sale callout, videos, specs, chat.</span>
-        </button>
-        <button
-          className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-md bg-[#fbe764] px-3 text-[10px] font-black uppercase text-[#071018] active:scale-[0.98]"
-          onClick={onDeal}
-        >
-          Deal
-          <ExternalLink size={12} />
+          {sharing ? "Opening" : activeRun ? "Share" : "Invite"}
         </button>
       </div>
     </div>
@@ -3293,34 +3603,26 @@ function PremiumWorldTeaser({
   return (
     <div className="mt-3 overflow-hidden rounded-md border border-[#ff7adf]/30 bg-[linear-gradient(135deg,rgba(255,122,223,0.16),rgba(124,242,255,0.10)_48%,rgba(251,231,100,0.10))]">
       <button className="block w-full p-3 text-left active:scale-[0.99]" onClick={proActive ? onPreview : onShop}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#ff9ee6]">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-[#ff7adf] text-[#071018] shadow-[0_10px_24px_rgba(255,122,223,0.18)]">
               <Crown size={13} />
-              {proActive ? "unlocked worlds" : "premium worlds"}
-            </div>
-            <div className="mt-1 truncate text-lg font-black leading-tight text-white">Premium Worlds</div>
-            <div className="mt-1 text-xs font-semibold leading-5 text-white/62">
-              E-Bike Land plus Skyline Circuit: glow paths, rooftop flow, glass bridges.
+            </span>
+            <div className="min-w-0">
+              <div className="truncate text-lg font-black leading-tight text-white">Premium Worlds</div>
+              <div className="mt-1 flex gap-1.5">
+                {["Glow", "Skyline"].map((label) => (
+                  <span key={label} className="rounded border border-white/10 bg-black/18 px-1.5 py-1 text-[9px] font-black uppercase tracking-[0.06em] text-white/58">
+                    {label}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
           <div className="shrink-0 rounded-md border border-[#fbe764]/30 bg-[#fbe764]/14 px-2 py-1 text-right">
             <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#fbe764]">{proActive ? "ready" : "pass"}</div>
             <div className="text-sm font-black text-white">{proActive ? "Ride" : "$1/$7"}</div>
           </div>
-        </div>
-        <div className="mt-3 grid grid-cols-4 gap-1.5">
-          {[
-            ["Glow", "#ff7adf"],
-            ["Jumps", "#ff8b4a"],
-            ["Skyline", "#7cf2ff"],
-            ["Bridge", "#a2ff9a"],
-          ].map(([label, color]) => (
-            <span key={label} className="min-h-10 rounded-md border border-white/10 bg-black/18 px-1.5 py-1.5">
-              <span className="block h-1.5 w-full rounded-full" style={{ backgroundColor: color }} />
-              <span className="mt-1 block truncate text-[9px] font-black uppercase tracking-[0.04em] text-white/68">{label}</span>
-            </span>
-          ))}
         </div>
       </button>
       {!proActive && (
@@ -3863,13 +4165,26 @@ function Leaderboard({
   onPeriod: (period: LeaderboardPeriod) => void;
   onMode: (mode: LeaderboardMode) => void;
 }) {
+  const rowsLabel = mode === "freestyle" ? "Park flow" : "Daily Dash";
+
   return (
     <div className="mt-4">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-white/52">
-          <Trophy size={13} />
-          leaderboard
+      <div className="mb-2 rounded-md border border-[#fbe764]/24 bg-[#fbe764]/10 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#fbe764]">
+              <Trophy size={13} />
+              rank board
+            </div>
+            <div className="mt-1 truncate text-lg font-black text-white">{rowsLabel}</div>
+          </div>
+          <div className="shrink-0 rounded-md border border-white/12 bg-black/18 px-2 py-1 text-right">
+            <div className="text-[9px] font-black uppercase tracking-[0.1em] text-white/42">{period}</div>
+            <div className="text-sm font-black text-white">{scope}</div>
+          </div>
         </div>
+      </div>
+      <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex rounded-md bg-white/8 p-0.5">
           {(["global", "friends"] as LeaderboardScope[]).map((item) => (
             <button
@@ -3885,12 +4200,27 @@ function Leaderboard({
             </button>
           ))}
         </div>
+        <div className="flex rounded-md bg-white/8 p-0.5">
+          {(["daily", "weekly"] as LeaderboardPeriod[]).map((item) => (
+            <button
+              key={item}
+              className="rounded px-2 py-1 text-[10px] font-black uppercase text-white"
+              style={{ background: period === item ? "rgba(251,231,100,0.22)" : "transparent" }}
+              onClick={() => {
+                haptic("selection");
+                onPeriod(item);
+              }}
+            >
+              {item === "daily" ? "today" : "week"}
+            </button>
+          ))}
+        </div>
       </div>
-      <div className="mb-2 grid grid-cols-2 gap-2">
+      <div className="mb-2 grid grid-cols-2 gap-1.5">
         {(["dash", "freestyle"] as LeaderboardMode[]).map((item) => (
           <button
             key={item}
-            className="min-h-8 rounded-md border px-2 text-[10px] font-black uppercase tracking-[0.08em] text-white"
+            className="min-h-9 rounded-md border px-2 text-[10px] font-black uppercase tracking-[0.08em] text-white"
             style={{
               borderColor: mode === item ? "rgba(162,255,154,0.72)" : "rgba(255,255,255,0.12)",
               background: mode === item ? "rgba(162,255,154,0.14)" : "rgba(255,255,255,0.06)",
@@ -3900,31 +4230,13 @@ function Leaderboard({
               onMode(item);
             }}
           >
-            {item === "dash" ? "dash" : "park"}
+            {item === "dash" ? "Dash" : "Park"}
           </button>
         ))}
       </div>
-      <div className="mb-2 grid grid-cols-2 gap-2">
-        {(["daily", "weekly"] as LeaderboardPeriod[]).map((item) => (
-          <button
-            key={item}
-            className="min-h-8 rounded-md border px-2 text-[10px] font-black uppercase tracking-[0.08em] text-white"
-            style={{
-              borderColor: period === item ? "rgba(251,231,100,0.72)" : "rgba(255,255,255,0.12)",
-              background: period === item ? "rgba(251,231,100,0.16)" : "rgba(255,255,255,0.06)",
-            }}
-            onClick={() => {
-              haptic("selection");
-              onPeriod(item);
-            }}
-          >
-            {item === "daily" ? "today" : "week"}
-          </button>
-        ))}
-      </div>
-      <div className="max-h-48 overflow-hidden rounded-md border border-white/12 bg-white/7">
+      <div className="max-h-56 overflow-hidden rounded-md border border-white/12 bg-white/7">
         {rows.length === 0 ? (
-          <div className="px-3 py-3 text-xs font-semibold text-white/50">No server scores yet. Finish a ride to seed today.</div>
+          <div className="px-3 py-4 text-xs font-semibold leading-5 text-white/50">No server scores yet. Finish a ride to seed this board.</div>
         ) : (
           rows.slice(0, 5).map((row, index) => (
             <div
@@ -3944,44 +4256,25 @@ function Leaderboard({
                 }
               }}
             >
-              <div className="w-5 text-xs font-black text-[#fbe764]">{index + 1}</div>
-              <ProfileAvatar src={row.pfpUrl} username={row.username} displayName={row.displayName} className="h-8 w-8" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-black text-white">{row.username ? `@${row.username}` : row.displayName || `fid:${row.fid}`}</div>
-                <div className="truncate text-[10px] font-bold text-white/45">{period === "weekly" && row.bestDateKey ? `best ${row.bestDateKey.slice(5)} - ` : ""}{row.routeName}</div>
-              </div>
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[#fbe764]/14 text-xs font-black text-[#fbe764]">{index + 1}</div>
               <button
                 aria-label={`Open ${row.username || row.displayName || "rider"} profile`}
-                className="rounded border border-white/10 bg-white/7 px-2 py-1 text-[9px] font-black uppercase tracking-[0.05em] text-white/62"
+                className="shrink-0 rounded-md active:scale-[0.96]"
                 onClick={(event) => {
                   event.stopPropagation();
                   haptic("selection");
                   if (row.fid > 0) onProfile(row.fid);
                 }}
               >
-                Profile
+                <ProfileAvatar src={row.pfpUrl} username={row.username} displayName={row.displayName} className="h-8 w-8" />
               </button>
-              <button
-                aria-label={`Challenge ${row.username || row.displayName || "rider"}`}
-                className="inline-flex items-center gap-1 rounded border border-[#fbe764]/35 bg-[#fbe764]/12 px-2 py-1 text-[9px] font-black uppercase tracking-[0.05em] text-[#fbe764]"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  haptic("selection");
-                  onChallenge(row);
-                }}
-              >
-                <Share2 size={10} />
-                Chase
-              </button>
-              <div className="grid min-w-[92px] grid-cols-2 gap-1 text-right">
-                <div>
-                  <div className="text-[8px] font-black uppercase tracking-[0.08em] text-white/38">day</div>
-                  <div className="text-xs font-black text-white">{row.dailyScore.toLocaleString()}</div>
-                </div>
-                <div>
-                  <div className="text-[8px] font-black uppercase tracking-[0.08em] text-white/38">week</div>
-                  <div className="text-xs font-black text-[#fbe764]">{row.weeklyScore.toLocaleString()}</div>
-                </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-xs font-black text-white">{row.username ? `@${row.username}` : row.displayName || `fid:${row.fid}`}</div>
+                <div className="truncate text-[10px] font-bold text-white/45">{period === "weekly" && row.bestDateKey ? `best ${row.bestDateKey.slice(5)} - ` : ""}{row.routeName}</div>
+              </div>
+              <div className="min-w-[72px] text-right">
+                <div className="text-[8px] font-black uppercase tracking-[0.08em] text-white/38">{period === "daily" ? "today" : "week"}</div>
+                <div className="text-sm font-black text-white">{(period === "daily" ? row.dailyScore : row.weeklyScore).toLocaleString()}</div>
               </div>
             </div>
           ))
@@ -4094,16 +4387,20 @@ function LoungePanel({ proActive, user }: { proActive: boolean; user?: { fid?: n
           ))
         )}
       </div>
-      <div className="mt-2 flex gap-1">
-        {emojis.map((emoji) => (
+      <div className="mt-2 grid grid-cols-4 gap-1.5">
+        {emojis.slice(0, 4).map((_, index) => {
+          const prompts = ["Ride today?", "Best line?", "Garage check", "Boost tip"];
+          const prompt = prompts[index];
+          return (
           <button
-            key={emoji}
-            className="h-8 w-8 rounded-md border border-white/12 bg-white/7 text-sm"
-            onClick={() => setDraft((value) => cleanDraft(`${value}${emoji}`))}
+            key={prompt}
+            className="min-h-8 rounded-md border border-white/12 bg-white/7 px-1.5 text-[9px] font-black uppercase text-white/62"
+            onClick={() => setDraft(prompt)}
           >
-            {emoji}
+            {prompt.split(" ")[0]}
           </button>
-        ))}
+          );
+        })}
       </div>
       <div className="mt-2 flex gap-2">
         <input
@@ -4126,12 +4423,11 @@ function LoungePanel({ proActive, user }: { proActive: boolean; user?: { fid?: n
 }
 
 function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; onShare: () => void }) {
-  const [showHappyVideo, setShowHappyVideo] = useState(false);
   const [guideDraft, setGuideDraft] = useState("");
   const [guideMessages, setGuideMessages] = useState<RangerGuideMessage[]>([
     {
       role: "guide",
-      text: "Ask me about Ranger range, speed, motor, payload, brakes, local rules, videos, or current deals.",
+      text: "I can help sort Ranger facts: deal, range, speed class, motor, brakes, weight, videos, and what to verify before buying.",
     },
   ]);
 
@@ -4144,148 +4440,57 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
 
   return (
     <div className="mt-4">
-      <button
-        className="mb-3 flex min-h-10 w-full items-center overflow-hidden rounded-md border border-[#fbe764]/35 bg-[#fbe764]/12 text-left active:scale-[0.99]"
-        onClick={() => onOpen(KINGBULL_SOVRN_URL)}
-      >
-        <span className="shrink-0 border-r border-[#fbe764]/25 px-3 text-[10px] font-black uppercase tracking-[0.12em] text-[#fbe764]">ad</span>
-          <span className="relative flex-1 overflow-hidden py-2">
-            <span className="block animate-[marquee_12s_linear_infinite] whitespace-nowrap text-xs font-black uppercase tracking-[0.08em] text-white">
-            Kingbull Ranger fan link - verify price and fit - try {KINGBULL_COUPON_CODE} for $50 off if eligible
-          </span>
-        </span>
-      </button>
-
       <div className="rounded-md border border-[#fbe764]/28 bg-[linear-gradient(135deg,rgba(251,231,100,0.12),rgba(124,242,255,0.08)_55%,rgba(255,122,223,0.08))] p-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.18em] text-[#fbe764]">
               <Sparkles size={13} />
-              side quest
+              fan guide
             </div>
-            <div className="mt-1 text-xl font-black leading-tight text-white">Kingbull Ranger Fan Garage</div>
+            <div className="mt-1 text-xl font-black leading-tight text-white">Ranger Fan Garage</div>
             <div className="mt-1 text-xs font-semibold leading-5 text-white/62">
-              Unaffiliated fan info. Not endorsed by Kingbull; verify specs, laws, price, fit, and support before buying.
+              A clean checklist for the Kingbull Ranger: deal, specs, videos, and buyer cautions in one place.
             </div>
           </div>
-          <div className="shrink-0 rounded-md border border-[#7cf2ff]/28 bg-[#7cf2ff]/10 px-2 py-1 text-right">
-            <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#7cf2ff]">fan</div>
-            <div className="text-sm font-black text-white">Ranger</div>
+          <div className="shrink-0 rounded-md border border-[#a2ff9a]/35 bg-[#a2ff9a]/12 px-2 py-1 text-right">
+            <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#a2ff9a]">code</div>
+            <div className="text-sm font-black text-white">{KINGBULL_COUPON_CODE}</div>
           </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-3 gap-1.5">
+          {[
+            ["Deal", "$799*"],
+            ["Range", "80 mi*"],
+            ["Class", "28 mph*"],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-md border border-white/10 bg-black/16 px-2 py-2">
+              <div className="text-[8px] font-black uppercase tracking-[0.08em] text-white/38">{label}</div>
+              <div className="mt-1 truncate text-sm font-black text-white">{value}</div>
+            </div>
+          ))}
         </div>
 
         <div className="mt-3 grid grid-cols-3 gap-2">
           <button className="min-h-10 rounded-md bg-[#fbe764] px-2 text-[10px] font-black uppercase text-[#071018]" onClick={() => onOpen(KINGBULL_RANGER_URL)}>
-            Buy Ranger
-          </button>
-          <button className="min-h-10 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/14 px-2 text-[10px] font-black uppercase text-white" onClick={() => onOpen(KINGBULL_RANGER_URL)}>
-            Deals
-          </button>
-          <button className="min-h-10 rounded-md border border-white/12 bg-white/8 px-2 text-[10px] font-black uppercase text-white/76" onClick={onShare}>
-            Share
-          </button>
-        </div>
-        <button
-          className="mt-2 flex min-h-11 w-full items-center justify-between gap-3 rounded-md border border-[#ff9ec7]/35 bg-[#ff9ec7]/12 px-3 text-left active:scale-[0.99]"
-          onClick={() => setShowHappyVideo(true)}
-        >
-          <span className="min-w-0">
-            <span className="block text-[9px] font-black uppercase tracking-[0.14em] text-[#ffb7d4]">happy popup</span>
-            <span className="block truncate text-sm font-black text-white">Watch until the end</span>
-          </span>
-          <Play size={17} className="shrink-0 text-[#fbe764]" />
-        </button>
-      </div>
-
-      <div className="mt-3 rounded-md border border-[#fbe764]/35 bg-[#fbe764]/12 p-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#fbe764]">
-              <Crown size={13} />
-              Ranger deal
-            </div>
-            <div className="mt-1 text-2xl font-black leading-none text-white">$799 sale</div>
-            <div className="mt-1 text-xs font-semibold leading-5 text-white/62">Fan-reported deal. Verify final checkout price, tax, shipping, warranty, and coupon eligibility.</div>
-          </div>
-          <div className="shrink-0 rounded-md border border-[#a2ff9a]/35 bg-[#a2ff9a]/12 px-3 py-2 text-center">
-            <div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#a2ff9a]">code</div>
-            <div className="mt-1 text-sm font-black text-white">{KINGBULL_COUPON_CODE}</div>
-          </div>
-        </div>
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <button className="min-h-10 rounded-md bg-[#fbe764] px-3 text-xs font-black uppercase text-[#071018]" onClick={() => onOpen(KINGBULL_RANGER_URL)}>
-            Buy with deal
+            Deal link
           </button>
           <button
-            className="min-h-10 rounded-md border border-white/12 bg-white/8 px-3 text-xs font-black uppercase text-white/72"
+            className="min-h-10 rounded-md border border-[#7cf2ff]/45 bg-[#7cf2ff]/14 px-2 text-[10px] font-black uppercase text-white"
             onClick={() => {
               navigator.clipboard?.writeText(KINGBULL_COUPON_CODE).catch(() => {});
             }}
           >
             Copy code
           </button>
+          <button className="min-h-10 rounded-md border border-white/12 bg-white/8 px-2 text-[10px] font-black uppercase text-white/76" onClick={onShare}>
+            Share
+          </button>
+        </div>
+        <div className="mt-2 text-[10px] font-semibold leading-4 text-white/44">
+          *Fan page signals only. Verify current price, specs, warranty, taxes, shipping, and local e-bike rules.
         </div>
       </div>
-
-      <div className="mt-3 rounded-md border border-[#7cf2ff]/30 bg-[#7cf2ff]/10 p-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#7cf2ff]">
-              <Bike size={13} />
-              suggested
-            </div>
-            <div className="mt-1 text-lg font-black leading-tight text-white">Kingbull Discover ST 2.0</div>
-            <div className="mt-1 text-xs font-semibold leading-5 text-white/62">
-              Premium off-road/city e-bike option to compare. Affiliate link; not a recommendation to buy.
-            </div>
-          </div>
-          <div className="shrink-0 rounded-md border border-white/12 bg-white/8 px-2 py-1 text-right">
-            <div className="text-[9px] font-black uppercase tracking-[0.1em] text-white/42">link</div>
-            <div className="text-sm font-black text-white">ST 2.0</div>
-          </div>
-        </div>
-        <button
-          className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-md bg-[#7cf2ff] px-3 text-xs font-black uppercase text-[#071018] active:scale-[0.98]"
-          onClick={() => onOpen(KINGBULL_DISCOVER_ST_AWIN_URL)}
-        >
-          View with affiliate link
-          <ExternalLink size={13} />
-        </button>
-      </div>
-
-      {showHappyVideo && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/72 p-4 backdrop-blur-md">
-          <div className="w-full max-w-[480px] overflow-hidden rounded-md border border-[#fbe764]/35 bg-[#071018] shadow-[0_24px_80px_rgba(0,0,0,0.55)]">
-            <div className="flex items-center justify-between gap-3 border-b border-white/10 px-3 py-2">
-              <div className="min-w-0">
-                <div className="text-[10px] font-black uppercase tracking-[0.16em] text-[#fbe764]">happy video</div>
-                <div className="truncate text-sm font-black text-white">Watch until the end</div>
-              </div>
-              <button
-                className="min-h-9 rounded-md border border-white/12 bg-white/8 px-3 text-[10px] font-black uppercase text-white/72"
-                onClick={() => setShowHappyVideo(false)}
-              >
-                Close
-              </button>
-            </div>
-            <VideoPreviewButton
-              id="7u2pJWIHby8"
-              title="Happy CasterCycle video"
-              subtitle="YouTube opens on tap"
-              aspect="video"
-              onOpen={() => onOpen("https://www.youtube.com/watch?v=7u2pJWIHby8")}
-            />
-            <div className="grid grid-cols-2 gap-2 p-3">
-              <button className="min-h-10 rounded-md bg-[#fbe764] px-3 text-xs font-black uppercase text-[#071018]" onClick={() => onOpen("https://www.youtube.com/watch?v=7u2pJWIHby8")}>
-                Open YouTube
-              </button>
-              <button className="min-h-10 rounded-md border border-white/12 bg-white/8 px-3 text-xs font-black uppercase text-white/72" onClick={() => setShowHappyVideo(false)}>
-                Back to quest
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="mt-3 rounded-md border border-[#7cf2ff]/24 bg-[#7cf2ff]/10 p-3">
         <div className="flex items-center justify-between gap-2">
@@ -4373,7 +4578,7 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
           </button>
         </div>
         <div className="space-y-2">
-          {RANGER_VIDEOS.map((video) => (
+          {RANGER_VIDEOS.slice(0, 2).map((video) => (
             <div key={video.id} className="overflow-hidden rounded-md border border-white/10 bg-black/24">
               <VideoPreviewButton
                 id={video.id}
@@ -4436,34 +4641,6 @@ function RangerFanQuest({ onOpen, onShare }: { onOpen: (url: string) => void; on
           <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-[#fbe764]">community</span>
           <span className="mt-1 block text-xs font-black text-white">Reddit search</span>
         </button>
-      </div>
-
-      <div className="mt-3 rounded-md border border-[#fbe764]/24 bg-[#fbe764]/10 p-3">
-        <div className="flex items-start gap-3">
-          <Image
-            src="/media/kingbull-ranger-qr.png"
-            alt="Kingbull affiliate promo QR code"
-            width={96}
-            height={96}
-            className="h-24 w-24 shrink-0 rounded-md border border-white/18 bg-white object-cover"
-          />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#fbe764]">
-              <ExternalLink size={13} />
-              scan promo qr
-            </div>
-            <div className="mt-1 text-sm font-black text-white">Kingbull Ranger deal link</div>
-            <div className="mt-1 text-[11px] font-semibold leading-4 text-white/58">
-              Use the QR or button for the same affiliate promo path.
-            </div>
-            <button
-              className="mt-2 min-h-9 rounded-md bg-[#fbe764] px-3 text-[10px] font-black uppercase text-[#071018]"
-              onClick={() => onOpen(KINGBULL_RANGER_URL)}
-            >
-              Open promo
-            </button>
-          </div>
-        </div>
       </div>
 
       <div className="mt-3 rounded-md border border-[#ff5d73]/24 bg-[#ff5d73]/10 p-3">
@@ -4881,7 +5058,7 @@ function lanePoint(width: number, height: number, lane: number, progress: number
   return { x: width / 2 + lane * spread, y, scale: 0.25 + progress * 1.18 };
 }
 
-function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height: number, free: FreeRideModel, skin: Skin, unlimited: boolean, now: number, preview = false) {
+function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height: number, free: FreeRideModel, skin: Skin, unlimited: boolean, now: number) {
   ctx.save();
   const nextSpot = nextFreeRideSpot(free);
   const sky = ctx.createLinearGradient(0, 0, 0, height);
@@ -4901,21 +5078,6 @@ function drawFreeRideScene(ctx: CanvasRenderingContext2D, width: number, height:
 
   drawFreeRideMotionFx(ctx, width / 2, height * 0.56, free, skin, now);
   drawFreeRidePlayer(ctx, width / 2, height * 0.56, free.heading, skin, now);
-
-  ctx.fillStyle = "rgba(7,16,24,0.62)";
-  ctx.strokeStyle = unlimited ? "#a2ff9a" : "#fbe764";
-  ctx.lineWidth = 2;
-  roundRect(ctx, 14, height * 0.13, Math.min(width - 118, 300), 54, 10);
-  ctx.fill();
-  ctx.stroke();
-  ctx.fillStyle = unlimited ? "#a2ff9a" : "#fbe764";
-  ctx.font = "900 10px system-ui, sans-serif";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.fillText(preview ? `${Math.ceil(free.remaining)}S ${routeForArea(free.area).name.toUpperCase()} PREVIEW` : unlimited ? (free.area === "statePark" ? "STATE PARK UNLIMITED" : free.area === "skyline" ? "SKYLINE UNLIMITED" : "UNLIMITED FREESTYLE") : `${Math.ceil(free.remaining)}S FREE RIDE`, 30, height * 0.13 + 19);
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "900 16px system-ui, sans-serif";
-  ctx.fillText(`${free.zone} - ${free.terrain}`, 30, height * 0.13 + 39);
 
   if (free.messageT > 0 && free.message) {
     ctx.save();
@@ -5720,7 +5882,6 @@ function drawScene(ctx: CanvasRenderingContext2D, width: number, height: number,
   drawPlayer(ctx, width, height, game, skin, now);
   drawFeedback(ctx, width, height, game);
 
-  if (game.phase === "ready") drawStartText(ctx, width, height, game);
   if (game.phase === "finished") drawFinishGate(ctx, width, height, game);
   drawVignette(ctx, width, height, game);
   ctx.restore();
@@ -6209,7 +6370,6 @@ function drawRoad(ctx: CanvasRenderingContext2D, width: number, height: number, 
 
 function drawRouteFx(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel, now: number) {
   const horizon = height * 0.25;
-  const pulse = 0.5 + Math.sin(now / 260) * 0.5;
   const comboGlow = Math.min(1, game.combo / 12);
   const chapter = raceChapter(game);
 
@@ -6252,27 +6412,6 @@ function drawRouteFx(ctx: CanvasRenderingContext2D, width: number, height: numbe
     ctx.lineTo(18, 24);
     ctx.stroke();
     ctx.restore();
-  }
-
-  if (game.phase !== "finished") {
-    const signY = horizon + 18 + Math.sin(now / 520) * 3;
-    const signW = Math.min(width - 108, 238);
-    ctx.globalAlpha = 0.42 + pulse * 0.12;
-    ctx.fillStyle = "rgba(17,25,35,0.58)";
-    ctx.strokeStyle = game.route.roadEdge;
-    ctx.lineWidth = 1.2;
-    ctx.shadowColor = game.route.roadEdge;
-    ctx.shadowBlur = 12;
-    roundRect(ctx, width / 2 - signW / 2, signY - 20, signW, 38, 7);
-    ctx.fill();
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-    ctx.globalAlpha = 0.78;
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "900 11px system-ui, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(`${chapter.name.toUpperCase()} ${Math.round(chapter.progress * 100)}%`, width / 2, signY);
   }
 
   ctx.globalAlpha = 0.56;
@@ -6678,15 +6817,6 @@ function drawPerspectiveWheel(ctx: CanvasRenderingContext2D, y: number, radiusX:
   ctx.beginPath();
   ctx.ellipse(0, y, rear ? 5 : 4, rear ? 7 : 5, 0, 0, Math.PI * 2);
   ctx.fill();
-}
-
-function drawStartText(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel) {
-  ctx.fillStyle = "rgba(17,25,35,0.42)";
-  ctx.fillRect(width * 0.35, height * 0.26, width * 0.3, 48);
-  ctx.fillStyle = "#fbe764";
-  ctx.font = "900 15px system-ui, sans-serif";
-  ctx.textAlign = "center";
-  ctx.fillText(game.route.name.toUpperCase(), width / 2, height * 0.26 + 30);
 }
 
 function drawFinishGate(ctx: CanvasRenderingContext2D, width: number, height: number, game: GameModel) {

@@ -73,6 +73,45 @@
 }
 
 @layer components {
+  .cc-app-shell {
+    background: var(--cc-shell-bg, #101b26);
+  }
+
+  .cc-footer-surface {
+    border-color: var(--cc-nav-border, rgba(255, 255, 255, 0.16));
+    background: var(--cc-nav-surface, rgba(7, 16, 24, 0.84));
+    box-shadow: var(--cc-nav-shadow, 0 -18px 52px rgba(0, 0, 0, 0.36));
+  }
+
+  .cc-nav-button {
+    color: var(--cc-nav-text, rgba(255, 255, 255, 0.58));
+  }
+
+  .cc-nav-button[data-active="true"] {
+    background: var(--cc-nav-selected-bg, rgba(248, 251, 255, 0.92));
+    color: var(--cc-nav-selected-text, #071018);
+    box-shadow: 0 10px 24px rgba(7, 16, 24, 0.22);
+  }
+
+  .cc-nav-button[data-active="false"] .cc-nav-icon {
+    color: var(--cc-nav-icon, rgba(255, 255, 255, 0.54));
+  }
+
+  .cc-themed-popover {
+    border-color: var(--cc-panel-border, rgba(255, 255, 255, 0.16));
+    background: var(--cc-popover-bg, rgba(7, 16, 24, 0.96));
+    color: var(--cc-popover-text, #fff);
+    box-shadow: 0 28px 90px rgba(0, 0, 0, 0.52);
+  }
+
+  .cc-themed-popover .text-white {
+    color: var(--cc-popover-text, #fff) !important;
+  }
+
+  .cc-themed-popover [class*="text-white/"] {
+    color: var(--cc-popover-muted, rgba(255, 255, 255, 0.56)) !important;
+  }
+
   .cc-bottom-sheet {
     max-height: min(78dvh, 660px) !important;
   }
