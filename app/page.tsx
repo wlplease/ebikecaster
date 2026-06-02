@@ -496,6 +496,19 @@ const DAILY_PARK_EVENTS = [
   { title: "Stream Skills", spot: "Stream Trail", terrain: "Stream", bonus: 840, color: "#5fcbea", detail: "Thread the stream edge cleanly." },
 ] as const;
 
+const PREMIUM_PASSPORT_MISSIONS = {
+  bikeLand: [
+    { title: "Charge Plaza Stamp", goal: "Find Charge Plaza", reward: 900 },
+    { title: "Jump Yard Chain", goal: "Clear 3 jump lines", reward: 1040 },
+    { title: "Neon Tunnel Run", goal: "Hold tunnel flow", reward: 960 },
+  ],
+  skyline: [
+    { title: "Beacon Stamp", goal: "Reach Beacon Tower", reward: 1120 },
+    { title: "Metro Drop Thread", goal: "Ride Metro Drop", reward: 1180 },
+    { title: "Glass Bridge Line", goal: "Cross Glass Bridge", reward: 1100 },
+  ],
+} as const;
+
 type FreeRideSpot = {
   name: string;
   short: string;
@@ -668,6 +681,16 @@ function dailyMission(seed: number) {
 function dailyParkEvent(key = localDateKey()) {
   const seed = dateSeed(key);
   return DAILY_PARK_EVENTS[seed % DAILY_PARK_EVENTS.length];
+}
+
+function dailyPaidMissions(key = localDateKey()) {
+  const seed = dateSeed(key);
+  const bikeLand = PREMIUM_PASSPORT_MISSIONS.bikeLand[seed % PREMIUM_PASSPORT_MISSIONS.bikeLand.length];
+  const skyline = PREMIUM_PASSPORT_MISSIONS.skyline[Math.floor(seed / 5) % PREMIUM_PASSPORT_MISSIONS.skyline.length];
+  return [
+    { ...bikeLand, area: "bikeLand" as RideArea, world: "E-Bike Land", accent: "#ff7adf" },
+    { ...skyline, area: "skyline" as RideArea, world: "Skyline", accent: "#7cf2ff" },
+  ];
 }
 
 function routeForArea(area: RideArea) {
@@ -1038,6 +1061,7 @@ export default function CasterCycleApp() {
   const { connectors, connect, isPending: connecting } = useConnect();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const sheetRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<GameModel>(makeGame());
   const rafRef = useRef<number | null>(null);
   const lastFrameRef = useRef<number | null>(null);
@@ -1051,6 +1075,7 @@ export default function CasterCycleApp() {
   const keyboardActionsRef = useRef({
     boostOrHop: () => {},
     changeLane: (() => {}) as (direction: -1 | 1) => void,
+    exitDashToMenu: () => {},
     freeRideActive: false,
     startRide: () => {},
     stopFreeRide: (() => {}) as (showShop?: boolean) => void,
@@ -1573,6 +1598,17 @@ export default function CasterCycleApp() {
     haptic("selection");
   }, [loadStats, rideArea, syncHud]);
 
+  const exitDashToMenu = useCallback(() => {
+    if (gameRef.current.phase !== "riding") return;
+    setLastRecap(null);
+    gameRef.current = makeGame(rideArea);
+    syncHud();
+    stopMotor();
+    setDashboardTab("ride");
+    setToast("Back to Play");
+    haptic("selection");
+  }, [rideArea, stopMotor, syncHud]);
+
   const startRide = useCallback(() => {
     if (gameRef.current.phase === "finished") {
       resetRide();
@@ -1995,6 +2031,7 @@ export default function CasterCycleApp() {
     keyboardActionsRef.current = {
       boostOrHop,
       changeLane,
+      exitDashToMenu,
       freeRideActive,
       startRide,
       stopFreeRide,
@@ -2005,7 +2042,7 @@ export default function CasterCycleApp() {
     const onKey = (event: KeyboardEvent) => {
       const actions = keyboardActionsRef.current;
       const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (target?.closest("button, a, input, textarea, select, [contenteditable='true']")) return;
       if (event.code === "ArrowLeft" || event.code === "KeyA") {
         event.preventDefault();
         actions.changeLane(-1);
@@ -2021,6 +2058,9 @@ export default function CasterCycleApp() {
       if ((event.code === "Escape" || event.code === "KeyP") && actions.freeRideActive) {
         event.preventDefault();
         actions.stopFreeRide(false);
+      } else if ((event.code === "Escape" || event.code === "KeyP") && gameRef.current.phase === "riding") {
+        event.preventDefault();
+        actions.exitDashToMenu();
       }
       if (event.code === "Enter" && gameRef.current.phase !== "riding") {
         event.preventDefault();
@@ -2040,6 +2080,10 @@ export default function CasterCycleApp() {
   useEffect(() => {
     if (miniAppAdded) setShowWelcomeBack(false);
   }, [miniAppAdded]);
+
+  useEffect(() => {
+    if (sheetRef.current) sheetRef.current.scrollTop = 0;
+  }, [dashboardTab]);
 
   useEffect(() => {
     const step = (now: number) => {
@@ -2433,6 +2477,10 @@ export default function CasterCycleApp() {
     };
   }, [effectivePro, finishRide, freeRideActive, playSfx, playVoice, skin, skinStats.boost, skinStats.grass, skinStats.speed, stopFreeRide, syncFreeRideHud, syncHud, updateMotor]);
 
+  const showingIntroPanel = hud.phase === "ready" && showIntro;
+  const showingWelcomePanel = hud.phase === "ready" && showWelcomeBack && !miniAppAdded;
+  const showFooterNav = !freeRideActive && hud.phase !== "riding" && !showingIntroPanel && !showingWelcomePanel;
+
   return (
     <main
       ref={shellRef}
@@ -2544,11 +2592,11 @@ export default function CasterCycleApp() {
             <Metric icon={<Flame size={14} />} label="combo" value={`${hud.combo}x`} />
             <Metric icon={<Bike size={14} />} label="lane" value={hud.targetLane === -1 ? "left" : hud.targetLane === 1 ? "right" : "mid"} />
           </div>
-          <div className="pointer-events-auto mt-2 grid grid-cols-3 gap-2">
+          <div className="pointer-events-auto mt-2 grid grid-cols-[0.9fr_1.1fr_0.9fr_1fr] gap-2">
             <button
               aria-label="Move left"
               aria-pressed={hud.targetLane === -1}
-              className={`inline-flex min-h-11 select-none items-center justify-center gap-1 rounded-md border text-xs font-black uppercase tracking-[0.08em] backdrop-blur-md touch-manipulation active:scale-[0.98] ${
+              className={`inline-flex min-h-11 select-none items-center justify-center gap-1 rounded-md border text-[10px] font-black uppercase tracking-[0.04em] backdrop-blur-md touch-manipulation active:scale-[0.98] ${
                 hud.targetLane === -1 ? "border-[#7cf2ff]/65 bg-[#7cf2ff]/18 text-[#7cf2ff]" : "border-white/18 bg-black/32 text-white/80"
               }`}
               onClick={() => changeLane(-1)}
@@ -2558,7 +2606,7 @@ export default function CasterCycleApp() {
             </button>
             <button
               aria-label="Hop"
-              className="inline-flex min-h-11 select-none items-center justify-center gap-1 rounded-md border border-[#fbe764]/50 bg-[#fbe764]/18 text-xs font-black uppercase tracking-[0.08em] text-[#fbe764] backdrop-blur-md touch-manipulation active:scale-[0.98]"
+              className="inline-flex min-h-11 select-none items-center justify-center gap-1 rounded-md border border-[#fbe764]/50 bg-[#fbe764]/18 text-[10px] font-black uppercase tracking-[0.04em] text-[#fbe764] backdrop-blur-md touch-manipulation active:scale-[0.98]"
               onClick={boostOrHop}
             >
               <Zap size={16} />
@@ -2567,7 +2615,7 @@ export default function CasterCycleApp() {
             <button
               aria-label="Move right"
               aria-pressed={hud.targetLane === 1}
-              className={`inline-flex min-h-11 select-none items-center justify-center gap-1 rounded-md border text-xs font-black uppercase tracking-[0.08em] backdrop-blur-md touch-manipulation active:scale-[0.98] ${
+              className={`inline-flex min-h-11 select-none items-center justify-center gap-1 rounded-md border text-[10px] font-black uppercase tracking-[0.04em] backdrop-blur-md touch-manipulation active:scale-[0.98] ${
                 hud.targetLane === 1 ? "border-[#7cf2ff]/65 bg-[#7cf2ff]/18 text-[#7cf2ff]" : "border-white/18 bg-black/32 text-white/80"
               }`}
               onClick={() => changeLane(1)}
@@ -2575,14 +2623,22 @@ export default function CasterCycleApp() {
               Right
               <ChevronRight size={18} />
             </button>
+            <button
+              aria-label="Exit to Play menu"
+              className="inline-flex min-h-11 select-none items-center justify-center gap-1 rounded-md border border-[#ff5d73]/45 bg-[#ff5d73]/18 px-1 text-[10px] font-black uppercase tracking-[0.04em] text-white backdrop-blur-md touch-manipulation active:scale-[0.98]"
+              onClick={exitDashToMenu}
+            >
+              <Map size={14} />
+              Park
+            </button>
           </div>
         </div>
       )}
 
       {!freeRideActive && hud.phase !== "riding" && (
-        <section className="pointer-events-auto absolute inset-x-0 bottom-0 z-20 px-3 pb-3">
-          <div className="cc-bottom-sheet no-scrollbar max-h-[88dvh] overflow-y-auto overscroll-contain rounded-md border border-white/12 bg-[#071018]/94 p-4 shadow-[0_-26px_80px_rgba(0,0,0,0.46)] backdrop-blur-2xl">
-            {hud.phase === "ready" && showIntro ? (
+        <section className={`pointer-events-auto absolute inset-x-0 z-20 px-3 ${showFooterNav ? "bottom-[86px] pb-2" : "bottom-0 pb-3"}`}>
+          <div ref={sheetRef} className={`cc-bottom-sheet no-scrollbar overflow-y-auto overscroll-contain rounded-md border border-white/12 bg-[#071018]/94 p-4 shadow-[0_-26px_80px_rgba(0,0,0,0.46)] backdrop-blur-2xl ${showFooterNav ? "cc-bottom-sheet-with-nav" : ""}`}>
+            {showingIntroPanel ? (
               <OnboardingPanel
                 step={introStep}
                 routeName={game.route.name}
@@ -2596,7 +2652,7 @@ export default function CasterCycleApp() {
                   requestAnimationFrame(() => startFreeRide());
                 }}
               />
-            ) : hud.phase === "ready" && showWelcomeBack && !miniAppAdded ? (
+            ) : showingWelcomePanel ? (
               <WelcomeBackPanel
                 displayName={displayName}
                 routeName={game.route.name}
@@ -2613,13 +2669,6 @@ export default function CasterCycleApp() {
                   routeName={game.route.name}
                   score={hud.score}
                   finished={hud.phase === "finished"}
-                />
-                <DashboardNav
-                  active={dashboardTab}
-                  onSelect={(tab) => {
-                    haptic("selection");
-                    setDashboardTab(tab);
-                  }}
                 />
 
                 {dashboardTab === "ride" && (
@@ -2689,6 +2738,16 @@ export default function CasterCycleApp() {
                       address={address}
                       accessLabel={accessLabel}
                     />
+                    <PremiumPassportPanel
+                      proActive={effectivePro}
+                      dateKey={game.dateKey}
+                      selectedSkin={skin}
+                      onGarage={() => {
+                        haptic("selection");
+                        setDashboardTab("garage");
+                      }}
+                      onRide={(area) => startFreeRide({ area, preview: !effectivePro })}
+                    />
                     <UpgradePanel
                       isPro={effectivePro}
                       dayActive={dayActive}
@@ -2746,6 +2805,16 @@ export default function CasterCycleApp() {
             )}
           </div>
         </section>
+      )}
+
+      {showFooterNav && (
+        <DashboardNav
+          active={dashboardTab}
+          onSelect={(tab) => {
+            haptic("selection");
+            setDashboardTab(tab);
+          }}
+        />
       )}
 
       <div className="pointer-events-none absolute inset-y-0 left-0 z-10 flex items-center pl-2 text-white/45">
@@ -2985,7 +3054,7 @@ function WelcomeBackPanel({
 }
 
 function dashboardMeta(tab: DashboardTab) {
-  if (tab === "shop") return { title: "Access", kicker: "wallet + pass", detail: "Simple passes, receipts, and terms.", accent: "#35f6c8", icon: <Wallet size={18} /> };
+  if (tab === "shop") return { title: "Passport", kicker: "premium access", detail: "Stamps, missions, pass, and receipts.", accent: "#35f6c8", icon: <Wallet size={18} /> };
   if (tab === "garage") return { title: "World", kicker: "map + bike", detail: "Choose the park, target spot, and skin.", accent: "#a2ff9a", icon: <Map size={18} /> };
   if (tab === "club") return { title: "Club", kicker: "paid lounge", detail: "Garage lounge, clean chat, social riders.", accent: "#c4b5fd", icon: <Users size={18} /> };
   if (tab === "quest") return { title: "Fan", kicker: "side quest", detail: "Kingbull Ranger fan garage and videos.", accent: "#ff9ec7", icon: <Sparkles size={18} /> };
@@ -3042,25 +3111,27 @@ function DashboardNav({ active, onSelect }: { active: DashboardTab; onSelect: (t
   ];
 
   return (
-    <nav className="cc-dashboard-nav sticky top-0 z-10 mt-3 rounded-md border border-white/10 bg-[#02070c]/86 p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.24)] backdrop-blur-xl">
-      <div className="grid grid-cols-6 gap-1">
+    <nav className="cc-footer-nav pointer-events-auto absolute inset-x-0 bottom-0 z-30 px-3 pb-3" aria-label="App navigation">
+      <div className="rounded-md border border-white/35 bg-[#f8fbff]/90 p-1.5 shadow-[0_-18px_52px_rgba(0,0,0,0.36)] backdrop-blur-2xl">
+        <div className="grid grid-cols-6 gap-1">
         {tabs.map((item) => {
           const selected = active === item.id;
           const meta = dashboardMeta(item.id);
           return (
             <button
               key={item.id}
-              className={`cc-nav-button flex min-h-[52px] flex-col items-center justify-center gap-1 rounded-md border px-1 text-center transition active:scale-[0.98] ${
-                selected ? "bg-white text-[#071018] shadow-[0_12px_26px_rgba(255,255,255,0.16)]" : "border-white/8 bg-white/[0.045] text-white/56"
+              aria-current={selected ? "page" : undefined}
+              className={`cc-nav-button flex min-h-[50px] flex-col items-center justify-center gap-1 rounded-md px-1 text-center transition active:scale-[0.98] ${
+                selected ? "bg-[#071018] text-white shadow-[0_10px_24px_rgba(7,16,24,0.22)]" : "text-[#071018]/58"
               }`}
-              style={{ borderColor: selected ? meta.accent : "rgba(255,255,255,0.08)" }}
               onClick={() => onSelect(item.id)}
             >
-              <span style={{ color: selected ? "#071018" : meta.accent }}>{item.icon}</span>
-              <span className="cc-nav-label block max-w-full truncate text-[9px] font-black uppercase tracking-[0.04em]">{item.label}</span>
+              <span style={{ color: selected ? meta.accent : "rgba(7,16,24,0.62)" }}>{item.icon}</span>
+              <span className="cc-nav-label block max-w-full truncate text-[9px] font-black leading-none tracking-normal">{item.label}</span>
             </button>
           );
         })}
+        </div>
       </div>
     </nav>
   );
@@ -3116,6 +3187,7 @@ function WorldHub({
 
       <div className="cc-ride-actions mt-3 grid grid-cols-2 gap-2">
         <button
+          aria-label="Start free roam"
           className="cc-ride-card min-h-[116px] rounded-md border border-[#a2ff9a]/35 bg-[#a2ff9a]/12 p-3 text-left shadow-[0_18px_40px_rgba(162,255,154,0.08)] active:scale-[0.98]"
           onClick={onFreeRide}
         >
@@ -3126,6 +3198,7 @@ function WorldHub({
           <span className="cc-compact-detail mt-1 block text-xs font-semibold leading-4 text-white/58">Open park. Any direction.</span>
         </button>
         <button
+          aria-label="Start Daily Dash"
           className="cc-ride-card min-h-[116px] rounded-md border border-[#7cf2ff]/35 bg-[#7cf2ff]/12 p-3 text-left shadow-[0_18px_40px_rgba(124,242,255,0.08)] active:scale-[0.98]"
           onClick={onStart}
         >
@@ -3260,6 +3333,108 @@ function PremiumWorldTeaser({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function PremiumPassportPanel({
+  proActive,
+  dateKey,
+  selectedSkin,
+  onGarage,
+  onRide,
+}: {
+  proActive: boolean;
+  dateKey: string;
+  selectedSkin: Skin;
+  onGarage: () => void;
+  onRide: (area: RideArea) => void;
+}) {
+  const passSkin = selectedSkin.unlock === "pro" ? selectedSkin : SKINS.find((item) => item.id === "neon") ?? selectedSkin;
+  const missions = dailyPaidMissions(dateKey);
+  const stamps = [
+    { area: "bikeLand" as RideArea, label: "E-Bike Land", code: "EBL", accent: "#ff7adf", icon: <Zap size={15} /> },
+    { area: "skyline" as RideArea, label: "Skyline", code: "SKY", accent: "#7cf2ff", icon: <Radio size={15} /> },
+  ];
+
+  return (
+    <div className="cc-passport mt-4 overflow-hidden rounded-md border border-white/45 bg-[#f8fbff] p-3 text-[#071018] shadow-[0_20px_48px_rgba(0,0,0,0.24)]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#6f7785]">
+            <Crown size={13} />
+            premium passport
+          </div>
+          <div className="mt-1 text-xl font-black leading-tight tracking-normal">Premium Passport</div>
+          <div className="mt-0.5 truncate text-xs font-semibold text-[#5a6370]">{dateKey.slice(5)} daily stamps</div>
+        </div>
+        <div className={`shrink-0 rounded-md px-2 py-1 text-right ${proActive ? "bg-[#071018] text-white" : "bg-[#dfe7ef] text-[#44505c]"}`}>
+          <div className="text-[9px] font-black uppercase tracking-[0.08em] opacity-70">{proActive ? "active" : "locked"}</div>
+          <div className="text-sm font-black">{proActive ? "Ready" : "$1/$7"}</div>
+        </div>
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        {stamps.map((stamp) => (
+          <button
+            key={stamp.area}
+            className="min-h-[92px] rounded-md border border-[#cbd7e2] bg-white px-2 py-2 text-left shadow-[inset_0_0_0_1px_rgba(255,255,255,0.75)] active:scale-[0.98]"
+            onClick={() => onRide(stamp.area)}
+          >
+            <span className="flex items-center justify-between gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-md text-white" style={{ backgroundColor: stamp.accent }}>
+                {stamp.icon}
+              </span>
+              <span className="rounded border border-dashed border-[#9aa8b7] px-2 py-1 text-[9px] font-black uppercase tracking-[0.08em] text-[#4f5965]">
+                {proActive ? "Stamped" : "Locked"}
+              </span>
+            </span>
+            <span className="mt-2 block text-sm font-black leading-tight">{stamp.label}</span>
+            <span className="mt-0.5 block text-[10px] font-black uppercase tracking-[0.12em] text-[#7d8794]">{stamp.code} passport mark</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-3 rounded-md border border-[#d3dee9] bg-[#eef4f8] p-2">
+        <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.14em] text-[#687584]">
+          <Target size={12} />
+          paid missions
+        </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          {missions.map((mission) => (
+            <div key={mission.area} className="rounded-md border border-white bg-white/78 px-2 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-[9px] font-black uppercase tracking-[0.08em]" style={{ color: mission.accent }}>
+                  {mission.world}
+                </span>
+                <span className="shrink-0 text-[9px] font-black text-[#5d6876]">+{mission.reward}</span>
+              </div>
+              <div className="mt-1 truncate text-xs font-black text-[#071018]">{mission.title}</div>
+              <div className="mt-0.5 truncate text-[10px] font-semibold text-[#697482]">{mission.goal}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <button
+        className="mt-3 flex min-h-12 w-full items-center justify-between gap-3 rounded-md border border-[#cbd7e2] bg-white px-3 text-left active:scale-[0.99]"
+        onClick={onGarage}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md" style={{ background: passSkin.frame }}>
+            <Bike size={17} className="text-[#071018]" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-[9px] font-black uppercase tracking-[0.12em] text-[#6f7785]">selected pass skin</span>
+            <span className="block truncate text-sm font-black text-[#071018]">{passSkin.name}</span>
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-1">
+          {[passSkin.frame, passSkin.battery, passSkin.trail].map((color, index) => (
+            <span key={`${color}-${index}`} className="h-4 w-4 rounded border border-[#071018]/10" style={{ background: color }} />
+          ))}
+        </span>
+      </button>
     </div>
   );
 }

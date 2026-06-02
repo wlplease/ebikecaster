@@ -76,6 +76,10 @@
   .cc-bottom-sheet {
     max-height: min(78dvh, 660px) !important;
   }
+
+  .cc-bottom-sheet-with-nav {
+    max-height: min(72dvh, 590px) !important;
+  }
 }
 
 @media (max-width: 380px), (max-height: 740px) {
@@ -145,14 +149,15 @@
     margin-top: 0.5rem;
   }
 
-  .cc-dashboard-nav {
-    margin-top: 0.5rem;
-    padding: 0.25rem;
+  .cc-footer-nav {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+    padding-bottom: 0.5rem;
   }
 
   .cc-nav-button {
-    min-height: 42px;
-    gap: 0.1rem;
+    min-height: 46px;
+    gap: 0.15rem;
   }
 
   .cc-nav-label {
@@ -197,6 +202,10 @@
 @media (max-height: 700px) {
   .cc-bottom-sheet {
     max-height: 70dvh !important;
+  }
+
+  .cc-bottom-sheet-with-nav {
+    max-height: 62dvh !important;
   }
 
   .cc-dashboard-stats,
