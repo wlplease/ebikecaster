@@ -78,7 +78,7 @@
   }
 
   .cc-bottom-sheet-with-nav {
-    max-height: min(72dvh, 590px) !important;
+    max-height: min(650px, calc(100dvh - 13.625rem)) !important;
   }
 }
 
@@ -122,6 +122,10 @@
   .cc-bottom-sheet {
     max-height: min(74dvh, 600px) !important;
     padding: 0.75rem;
+  }
+
+  .cc-bottom-sheet-with-nav {
+    max-height: min(600px, calc(100dvh - 13rem)) !important;
   }
 
   .cc-dashboard-header {
@@ -205,7 +209,7 @@
   }
 
   .cc-bottom-sheet-with-nav {
-    max-height: 62dvh !important;
+    max-height: min(540px, calc(100dvh - 12.5rem)) !important;
   }
 
   .cc-dashboard-stats,
